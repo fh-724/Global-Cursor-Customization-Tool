@@ -2419,6 +2419,25 @@ class ControlPanel(QWidget):
 
 
 def create_tray_icon() -> QIcon:
+    """托盘图标：优先复用 exe 内嵌的应用图标（与文件管理器里看到的一致）。
+
+    打包后从 exe 资源里取；源码运行时读 assets/icon.ico；
+    两者都取不到（例如只拷贝了 .py 文件）才退回手绘圆点。
+    """
+    try:
+        if getattr(sys, "frozen", False):
+            icon = QIcon(sys.executable)
+            if not icon.isNull():
+                return icon
+        else:
+            asset = Path(__file__).resolve().parent / "assets" / "icon.ico"
+            if asset.exists():
+                icon = QIcon(str(asset))
+                if not icon.isNull():
+                    return icon
+    except Exception:
+        pass
+
     pix = QPixmap(32, 32)
     pix.fill(Qt.GlobalColor.transparent)
     p = QPainter(pix)

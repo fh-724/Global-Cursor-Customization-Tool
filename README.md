@@ -1,5 +1,7 @@
 # ✨ MouseFX
 
+<p align="center"><img src="assets/icon.png" width="120" alt="MouseFX icon"></p>
+
 **A lightweight Windows cursor effects overlay** · 6 styles · trails · falling sakura · ink wash + full 13-slot system cursor replacement · single exe, no install
 
 [🇺🇸 English](#english) | [🇨🇳 中文](#中文简介)
