@@ -3,176 +3,87 @@
 用法：
     python tools/make_icon.py
 
-设计：深色圆角底 + 青→紫→粉渐变光标箭头 + 光晕 + 星芒。
-小尺寸（16/24/32）单独一套画法：箭头更大、描边更粗、去掉星芒，
-否则缩到 16px 会糊成一团、在白色列表背景上看不清。
+极简风格：深色圆角方块 + 纯白鼠标指针，无渐变、无光晕、无星芒。
+纯扁平图形在任何尺寸下都能等比缩放，不需要单独画小尺寸版本。
+
+想换成青色底，只改 BACKGROUND 一行即可（见文件底部 COLOR SCHEMES）。
 """
 
 from __future__ import annotations
 
-import math
 from pathlib import Path
 
-import numpy as np
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw
 
-S = 1024  # 超采样画布尺寸
+S = 4096  # 超采样画布（扁平图形放大再缩小，边缘更干净）
 OUT_DIR = Path(__file__).resolve().parent.parent / "assets"
 
-CYAN = (34, 211, 238)
-VIOLET = (168, 85, 247)
-PINK = (244, 114, 182)
+# 基础轮廓（Windows 指针原味比例）。
+# 注意：x、y 必须用同一个基准归一化（这里都是 /18），否则箭头会被横向拉宽
+ARROW_POINTS = [
+    (0.000, 0.000), (0.000, 0.778), (0.194, 0.583), (0.306, 0.833),
+    (0.417, 0.778), (0.306, 0.528), (0.528, 0.528),
+]
+ARROW_BOX = (
+    max(p[0] for p in ARROW_POINTS),
+    max(p[1] for p in ARROW_POINTS),
+)
+ARROW_RATIO = 0.62  # 箭头高度占画布的比例
+RADIUS_RATIO = 0.23  # 圆角半径占画布的比例
+
+BACKGROUND = (15, 18, 24)
+ARROW_COLOR = (255, 255, 255)
 
 
-def rounded_mask(size: int, radius: int) -> Image.Image:
-    mask = Image.new("L", (size, size), 0)
-    ImageDraw.Draw(mask).rounded_rectangle([0, 0, size - 1, size - 1], radius=radius, fill=255)
-    return mask
-
-
-def linear_gradient(size: int, stops: list[tuple[float, tuple[int, int, int]]],
-                    start: tuple[float, float] = (0.15, 0.05),
-                    end: tuple[float, float] = (0.9, 0.95)) -> Image.Image:
-    """沿对角线生成多段线性渐变。"""
-    ys, xs = np.mgrid[0:size, 0:size].astype(np.float32)
-    vx, vy = end[0] - start[0], end[1] - start[1]
-    t = ((xs / size - start[0]) * vx + (ys / size - start[1]) * vy) / (vx * vx + vy * vy)
-    t = np.clip(t, 0.0, 1.0)
-
-    channels = np.zeros((size, size, 3), dtype=np.float32)
-    for i in range(len(stops) - 1):
-        t0, c0 = stops[i]
-        t1, c1 = stops[i + 1]
-        seg = (t >= t0) & (t <= t1)
-        local = np.clip((t - t0) / max(t1 - t0, 1e-6), 0.0, 1.0)
-        for ch in range(3):
-            channels[..., ch] = np.where(
-                seg, c0[ch] + (c1[ch] - c0[ch]) * local, channels[..., ch]
-            )
-    return Image.fromarray(channels.astype(np.uint8), "RGB")
-
-
-def radial_glow(size: int, center: tuple[float, float], radius: float,
-                color: tuple[int, int, int], peak_alpha: int) -> Image.Image:
-    """椭圆形软光斑。"""
-    layer = Image.new("L", (size, size), 0)
-    d = ImageDraw.Draw(layer)
-    cx, cy = center[0] * size, center[1] * size
-    steps = 26
-    for i in range(steps, 0, -1):
-        k = i / steps
-        alpha = int(peak_alpha * (1.0 - k) ** 2.2)
-        r = radius * size * k
-        d.ellipse([cx - r, cy - r * 0.9, cx + r, cy + r * 0.9], fill=alpha)
-    layer = layer.filter(ImageFilter.GaussianBlur(size * 0.02))
-    glow = Image.new("RGBA", (size, size), color + (0,))
-    glow.putalpha(layer)
-    return glow
-
-
-def cursor_polygon(width: float, height: float, origin: tuple[float, float]) -> list[tuple[float, float]]:
-    """标准箭头指针轮廓，按目标尺寸缩放。"""
-    base = [(0.00, 0.00), (0.00, 0.70), (0.17, 0.55), (0.29, 0.83),
-            (0.42, 0.77), (0.30, 0.50), (0.50, 0.50)]
+def cursor_polygon(height: float, origin: tuple[float, float]) -> list[tuple[float, float]]:
+    box_w, box_h = ARROW_BOX
+    width = height * (box_w / box_h)
     ox, oy = origin
-    return [(ox + x * width, oy + y * height) for x, y in base]
+    return [(ox + x * width, oy + y * height) for x, y in ARROW_POINTS]
 
 
-def sparkle(size: int, center: tuple[float, float], radius: float,
-            color: tuple[int, int, int], alpha: int = 235) -> Image.Image:
-    layer = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    d = ImageDraw.Draw(layer)
-    cx, cy = center
-    pts = []
-    for i in range(8):
-        ang = -math.pi / 2 + i * math.pi / 4
-        r = radius if i % 2 == 0 else radius * 0.26
-        pts.append((cx + math.cos(ang) * r, cy + math.sin(ang) * r))
-    d.polygon(pts, fill=color + (alpha,))
-    return layer
-
-
-def build(large: bool = True) -> Image.Image:
-    """large=True 用在 48px 以上；large=False 是给小尺寸的简化版。"""
+def build(background: tuple[int, int, int] | None = BACKGROUND,
+          arrow: tuple[int, int, int] = ARROW_COLOR) -> Image.Image:
     canvas = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    d = ImageDraw.Draw(canvas)
 
-    # 1) 深色圆角底 + 对角青→紫渐变
-    stops = [(0.0, (10, 14, 26)), (0.45, (18, 20, 44)), (1.0, (28, 18, 48))] if large else \
-            [(0.0, (12, 18, 34)), (0.5, (22, 26, 56)), (1.0, (34, 22, 58))]
-    bg = linear_gradient(S, stops).convert("RGBA")
-    canvas.paste(bg, (0, 0), rounded_mask(S, 208 if large else 230))
+    if background is not None:
+        d.rounded_rectangle(
+            [0, 0, S - 1, S - 1], radius=int(S * RADIUS_RATIO), fill=background + (255,)
+        )
 
-    # 2) 两团光晕：左上青、右下粉（小尺寸加强，保证对比）
-    canvas.alpha_composite(radial_glow(S, (0.24, 0.2), 0.42, CYAN, 120 if large else 150))
-    canvas.alpha_composite(radial_glow(S, (0.82, 0.86), 0.38, PINK, 105 if large else 130))
-
-    # 3) 指针箭头（带外发光）。基础轮廓包围盒 0.50×0.83，保持比例不被拉伸
-    poly_h = 760.0 if large else 900.0
-    poly_w = poly_h * (0.50 / 0.83)
-    ox = (S - poly_w) / 2 + (14 if large else 4)
-    oy = (S - poly_h) / 2 + (4 if large else 0)
-    poly = cursor_polygon(poly_w, poly_h, (ox, oy))
-
-    arrow_mask = Image.new("L", (S, S), 0)
-    ImageDraw.Draw(arrow_mask).polygon(poly, fill=255)
-
-    halo = Image.new("RGBA", (S, S), CYAN + (0,))
-    halo.putalpha(arrow_mask.filter(ImageFilter.GaussianBlur(S * (0.035 if large else 0.05))))
-    halo.putalpha(halo.getchannel("A").point(lambda v: int(v * (0.85 if large else 1.0))))
-    canvas.alpha_composite(halo)
-
-    # 4) 描边：掩膜膨胀，转角圆滑、无缺口；小尺寸描边加粗以免缩没
-    if large:
-        white_k, navy_k = 19, 35
-    else:
-        white_k, navy_k = 33, 53  # MaxFilter 只接受奇数
-    stroke_white = arrow_mask.filter(ImageFilter.MaxFilter(white_k))
-    stroke_navy = arrow_mask.filter(ImageFilter.MaxFilter(navy_k))
-    canvas.paste(Image.new("RGBA", (S, S), (9, 12, 24, 240)), (0, 0), stroke_navy)
-    canvas.paste(Image.new("RGBA", (S, S), (255, 255, 255, 250)), (0, 0), stroke_white)
-
-    # 5) 箭头本体：青 → 紫 → 粉
-    fill = linear_gradient(S, [(0.0, CYAN), (0.5, VIOLET), (1.0, PINK)],
-                           start=(0.3, 0.1), end=(0.72, 0.95)).convert("RGBA")
-    canvas.paste(fill, (0, 0), arrow_mask)
-
-    # 6) 星芒点缀（只在较大尺寸出现，小尺寸会变成噪点）
-    if large:
-        canvas.alpha_composite(sparkle(S, (785, 250), 74, CYAN))
-        canvas.alpha_composite(sparkle(S, (250, 760), 58, PINK))
-        canvas.alpha_composite(sparkle(S, (840, 690), 34, (255, 255, 255), 200))
-
+    h = S * ARROW_RATIO
+    w = h * (0.50 / 0.83)
+    # 箭头形状本身偏左上，往右下轻推一点点才是视觉居中
+    ox = (S - w) / 2 + S * 0.025
+    oy = (S - h) / 2 + S * 0.012
+    d.polygon(cursor_polygon(h, (ox, oy)), fill=arrow + (255,))
     return canvas
 
 
 def main() -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    art_large = build(large=True)
-    art_small = build(large=False)
+    art = build()
 
-    art_large.resize((512, 512), Image.LANCZOS).save(OUT_DIR / "icon.png")
-    art_large.save(OUT_DIR / "icon-1024.png")
+    art.resize((512, 512), Image.LANCZOS).save(OUT_DIR / "icon.png")
+    art.resize((1024, 1024), Image.LANCZOS).save(OUT_DIR / "icon-1024.png")
 
-    # 大尺寸用精细版，16/24/32 用简化版，保证列表视图里也认得出
-    plan = [
-        ((256, 256), art_large),
-        ((128, 128), art_large),
-        ((64, 64), art_large),
-        ((48, 48), art_large),
-        ((32, 32), art_small),
-        ((24, 24), art_small),
-        ((16, 16), art_small),
-    ]
-    frames = [(art.resize(size, Image.LANCZOS), size) for size, art in plan]
-    frames[0][0].save(
+    sizes = [(256, 256), (128, 128), (64, 64), (48, 48), (32, 32), (24, 24), (16, 16)]
+    frames = [art.resize(size, Image.LANCZOS) for size in sizes]
+    frames[0].save(
         OUT_DIR / "icon.ico",
         format="ICO",
-        sizes=[size for _, size in frames],
-        append_images=[img for img, _ in frames[1:]],
+        sizes=sizes,
+        append_images=frames[1:],
     )
     print(f"已生成: {OUT_DIR / 'icon.ico'}")
-    print(f"已生成: {OUT_DIR / 'icon.png'}")
 
+
+# COLOR SCHEMES（改这里换配色）
+#   A 深色底 + 白箭头：  BACKGROUND = (15, 18, 24);    ARROW_COLOR = (255, 255, 255)
+#   B 青色底 + 白箭头：  BACKGROUND = (34, 211, 238);  ARROW_COLOR = (255, 255, 255)
+#   C 深色底 + 青箭头：  BACKGROUND = (11, 14, 20);    ARROW_COLOR = (34, 211, 238)
+#   纯透明背景：         BACKGROUND = None
 
 if __name__ == "__main__":
     main()
