@@ -1,8 +1,53 @@
 # ✨ MouseFX
 
-**Windows 全局鼠标特效悬浮层** · 光晕 / 拖尾 / 落樱 / 水墨 + 全套 13 种系统指针替换 · 单文件 exe，免安装
+**A lightweight Windows cursor effects overlay** · 6 styles · trails · falling sakura · ink wash + full 13-slot system cursor replacement · single exe, no install
 
-[🇨🇳 中文](#中文简介) | [🇺🇸 English](#english)
+[🇺🇸 English](#english) | [🇨🇳 中文](#中文简介)
+
+---
+
+## English
+
+**MouseFX** is a fun, lightweight system-wide cursor effects utility for Windows that I built with **AI-assisted development**, powered by Python and PyQt6 🚀. Zero external image assets needed—just pure, silky desktop magic running quietly in the background ✨!
+
+### 🎨 What's Cool About It?
+
+* ⚡ **Buttery Smooth at 240Hz & Multi-Monitor Ready**: Delta-time physics keep animations silky at high refresh rates across all your monitors. Choose whether effects float over every window or chill strictly on the desktop layer.
+* 🪄 **Effects + Full Custom Cursor Sets**: Switch between 6 artistic vibes (Ambient Spotlight, Constellation Web, Magnetic Ring, Ink Wash, Optical Prism, and Falling Sakura 🌸) with matching 13-slot Windows system cursors—everything snaps cleanly back to your default cursors when paused or closed.
+* 🎛️ **Stackable Extras & Free Color Tuning**: Left-click the tray icon to pop open the control panel—layer on silk ribbon trails, Kelvin water-wake ripples 🌊, a taskbar-safe flashlight dark mask 🔦, or demo click ripples, plus custom color picking 🎨 and one-click presets.
+* 🛡️ **Zero-Hassle Daily Driver**: Comes with single-instance protection, automatic pause during fullscreen games or videos 🎮, persistent local settings, and optional Windows startup launch.
+
+### 🚀 Quick Start
+
+* **Grab the `.exe` directly**: Don't want to set up Python? Just head over to **Releases** on the right and download `MouseFX.exe` from the attachments—double-click and enjoy 🎉!
+* **Run from source** (Windows 10 / 11, Python 3.10+):
+
+```bash
+# 1. Install PyQt6
+pip install PyQt6
+
+# 2. Launch right away
+python windows_mouse_fx.py
+```
+
+* **Build your own `.exe`**:
+
+```bash
+pip install pyinstaller
+pyinstaller --onefile --noconsole --name MouseFX windows_mouse_fx.py
+```
+
+Left-click the system tray icon anytime to tweak your setup! 🖱️✨
+
+### 🆘 Cursors Stuck on the Custom Style?
+
+If MouseFX gets killed hard (Task Manager "End task", `taskkill /F`, or a crash), the cursors may stay customized. Pick any of these:
+
+* **Just relaunch MouseFX** 🧹 — on startup it checks whether the previous session exited cleanly and restores the leftover cursors first.
+* **One-shot restore** ⚡ (no UI): run `MouseFX.exe --restore` and it exits immediately.
+* Log off / reboot, or open **Settings → Mouse → Pointers**, pick any scheme and hit OK.
+
+> 💡 Since v1.0.0, a *graceful* close (Task Manager "End task", or `taskkill` without `/F`) runs the full shutdown path instead of leaving a zombie process behind. `taskkill /F` is a kernel-level kill — the process never gets to run cleanup code, so use one of the three options above in that case.
 
 ---
 
@@ -49,51 +94,6 @@ pyinstaller --onefile --noconsole --name MouseFX windows_mouse_fx.py
 
 > 💡 v1.0.0 起，温和关闭（任务管理器「结束任务」、`taskkill` 不带 `/F`）已经会走完整收尾流程，不再留下"界面没了但进程还在"的僵尸实例。
 > `taskkill /F` 属于内核级强杀，进程没有任何机会执行代码，这种情况只能靠上面三种方式补救。
-
----
-
-## English
-
-**MouseFX** is a fun, lightweight system-wide cursor effects utility for Windows that I built with **AI-assisted development**, powered by Python and PyQt6 🚀. Zero external image assets needed—just pure, silky desktop magic running quietly in the background ✨!
-
-### 🎨 What's Cool About It?
-
-* ⚡ **Buttery Smooth at 240Hz & Multi-Monitor Ready**: Delta-time physics keep animations silky at high refresh rates across all your monitors. Choose whether effects float over every window or chill strictly on the desktop layer.
-* 🪄 **Effects + Full Custom Cursor Sets**: Switch between 6 artistic vibes (Ambient Spotlight, Constellation Web, Magnetic Ring, Ink Wash, Optical Prism, and Falling Sakura 🌸) with matching 13-slot Windows system cursors—everything snaps cleanly back to your default cursors when paused or closed.
-* 🎛️ **Stackable Extras & Free Color Tuning**: Left-click the tray icon to pop open the control panel—layer on silk ribbon trails, Kelvin water-wake ripples 🌊, a taskbar-safe flashlight dark mask 🔦, or demo click ripples, plus custom color picking 🎨 and one-click presets.
-* 🛡️ **Zero-Hassle Daily Driver**: Comes with single-instance protection, automatic pause during fullscreen games or videos 🎮, persistent local settings, and optional Windows startup launch.
-
-### 🚀 Quick Start
-
-* **Grab the `.exe` directly**: Don't want to set up Python? Just head over to **Releases** on the right and download `MouseFX.exe` from the attachments—double-click and enjoy 🎉!
-* **Run from source** (Windows 10 / 11, Python 3.10+):
-
-```bash
-# 1. Install PyQt6
-pip install PyQt6
-
-# 2. Launch right away
-python windows_mouse_fx.py
-```
-
-* **Build your own `.exe`**:
-
-```bash
-pip install pyinstaller
-pyinstaller --onefile --noconsole --name MouseFX windows_mouse_fx.py
-```
-
-Left-click the system tray icon anytime to tweak your setup! 🖱️✨
-
-### 🆘 Cursors Stuck on the Custom Style?
-
-If MouseFX gets killed hard (Task Manager "End task", `taskkill /F`, or a crash), the cursors may stay customized. Pick any of these:
-
-* **Just relaunch MouseFX** 🧹 — on startup it checks whether the previous session exited cleanly and restores the leftover cursors first.
-* **One-shot restore** ⚡ (no UI): run `MouseFX.exe --restore` and it exits immediately.
-* Log off / reboot, or open **Settings → Mouse → Pointers**, pick any scheme and hit OK.
-
-> 💡 Since v1.0.0, a *graceful* close (Task Manager "End task", or `taskkill` without `/F`) runs the full shutdown path instead of leaving a zombie process behind. `taskkill /F` is a kernel-level kill — the process never gets to run cleanup code, so use one of the three options above in that case.
 
 ---
 
