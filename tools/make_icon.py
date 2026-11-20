@@ -3,8 +3,9 @@
 用法：
     python tools/make_icon.py
 
-设计：深色圆角底 + 青→紫→粉渐变光标箭头 + 光晕 + 星芒，
-16px 下仍能读成"鼠标指针"。
+设计：深色圆角底 + 青→紫→粉渐变光标箭头 + 光晕 + 星芒。
+小尺寸（16/24/32）单独一套画法：箭头更大、描边更粗、去掉星芒，
+否则缩到 16px 会糊成一团、在白色列表背景上看不清。
 """
 
 from __future__ import annotations
@@ -91,69 +92,83 @@ def sparkle(size: int, center: tuple[float, float], radius: float,
     return layer
 
 
-def build() -> Image.Image:
+def build(large: bool = True) -> Image.Image:
+    """large=True 用在 48px 以上；large=False 是给小尺寸的简化版。"""
     canvas = Image.new("RGBA", (S, S), (0, 0, 0, 0))
 
     # 1) 深色圆角底 + 对角青→紫渐变
-    bg = linear_gradient(
-        S,
-        [(0.0, (10, 14, 26)), (0.45, (18, 20, 44)), (1.0, (28, 18, 48))],
-    ).convert("RGBA")
-    canvas.paste(bg, (0, 0), rounded_mask(S, 208))
+    stops = [(0.0, (10, 14, 26)), (0.45, (18, 20, 44)), (1.0, (28, 18, 48))] if large else \
+            [(0.0, (12, 18, 34)), (0.5, (22, 26, 56)), (1.0, (34, 22, 58))]
+    bg = linear_gradient(S, stops).convert("RGBA")
+    canvas.paste(bg, (0, 0), rounded_mask(S, 208 if large else 230))
 
-    # 2) 两团光晕：左上青、右下粉
-    canvas.alpha_composite(radial_glow(S, (0.24, 0.2), 0.42, CYAN, 120))
-    canvas.alpha_composite(radial_glow(S, (0.82, 0.86), 0.38, PINK, 105))
+    # 2) 两团光晕：左上青、右下粉（小尺寸加强，保证对比）
+    canvas.alpha_composite(radial_glow(S, (0.24, 0.2), 0.42, CYAN, 120 if large else 150))
+    canvas.alpha_composite(radial_glow(S, (0.82, 0.86), 0.38, PINK, 105 if large else 130))
 
-    # 3) 指针箭头（带外发光）
-    # 基础轮廓的包围盒是 0.50 × 0.83，保持这个长宽比才像真指针，不能被拉伸
-    poly_h = 760.0
+    # 3) 指针箭头（带外发光）。基础轮廓包围盒 0.50×0.83，保持比例不被拉伸
+    poly_h = 760.0 if large else 900.0
     poly_w = poly_h * (0.50 / 0.83)
-    ox, oy = (S - poly_w) / 2 + 14, (S - poly_h) / 2 + 4
+    ox = (S - poly_w) / 2 + (14 if large else 4)
+    oy = (S - poly_h) / 2 + (4 if large else 0)
     poly = cursor_polygon(poly_w, poly_h, (ox, oy))
 
     arrow_mask = Image.new("L", (S, S), 0)
     ImageDraw.Draw(arrow_mask).polygon(poly, fill=255)
 
     halo = Image.new("RGBA", (S, S), CYAN + (0,))
-    halo.putalpha(arrow_mask.filter(ImageFilter.GaussianBlur(S * 0.035)))
-    halo.putalpha(halo.getchannel("A").point(lambda v: int(v * 0.85)))
+    halo.putalpha(arrow_mask.filter(ImageFilter.GaussianBlur(S * (0.035 if large else 0.05))))
+    halo.putalpha(halo.getchannel("A").point(lambda v: int(v * (0.85 if large else 1.0))))
     canvas.alpha_composite(halo)
 
-    # 4) 描边：用掩膜膨胀生成等宽描边，比画折线干净（转角圆滑、无缺口）
-    stroke_white = arrow_mask.filter(ImageFilter.MaxFilter(19))
-    stroke_navy = arrow_mask.filter(ImageFilter.MaxFilter(35))
+    # 4) 描边：掩膜膨胀，转角圆滑、无缺口；小尺寸描边加粗以免缩没
+    if large:
+        white_k, navy_k = 19, 35
+    else:
+        white_k, navy_k = 33, 53  # MaxFilter 只接受奇数
+    stroke_white = arrow_mask.filter(ImageFilter.MaxFilter(white_k))
+    stroke_navy = arrow_mask.filter(ImageFilter.MaxFilter(navy_k))
     canvas.paste(Image.new("RGBA", (S, S), (9, 12, 24, 240)), (0, 0), stroke_navy)
-    canvas.paste(Image.new("RGBA", (S, S), (255, 255, 255, 243)), (0, 0), stroke_white)
+    canvas.paste(Image.new("RGBA", (S, S), (255, 255, 255, 250)), (0, 0), stroke_white)
 
     # 5) 箭头本体：青 → 紫 → 粉
     fill = linear_gradient(S, [(0.0, CYAN), (0.5, VIOLET), (1.0, PINK)],
                            start=(0.3, 0.1), end=(0.72, 0.95)).convert("RGBA")
     canvas.paste(fill, (0, 0), arrow_mask)
 
-    # 6) 星芒点缀
-    canvas.alpha_composite(sparkle(S, (785, 250), 74, CYAN))
-    canvas.alpha_composite(sparkle(S, (250, 760), 58, PINK))
-    canvas.alpha_composite(sparkle(S, (840, 690), 34, (255, 255, 255), 200))
+    # 6) 星芒点缀（只在较大尺寸出现，小尺寸会变成噪点）
+    if large:
+        canvas.alpha_composite(sparkle(S, (785, 250), 74, CYAN))
+        canvas.alpha_composite(sparkle(S, (250, 760), 58, PINK))
+        canvas.alpha_composite(sparkle(S, (840, 690), 34, (255, 255, 255), 200))
 
     return canvas
 
 
 def main() -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    art = build()
+    art_large = build(large=True)
+    art_small = build(large=False)
 
-    png = art.resize((512, 512), Image.LANCZOS)
-    png.save(OUT_DIR / "icon.png")
-    art.resize((1024, 1024), Image.LANCZOS).save(OUT_DIR / "icon-1024.png")
+    art_large.resize((512, 512), Image.LANCZOS).save(OUT_DIR / "icon.png")
+    art_large.save(OUT_DIR / "icon-1024.png")
 
-    sizes = [(256, 256), (128, 128), (64, 64), (48, 48), (32, 32), (24, 24), (16, 16)]
-    frames = [art.resize(s, Image.LANCZOS) for s in sizes]
-    frames[0].save(
+    # 大尺寸用精细版，16/24/32 用简化版，保证列表视图里也认得出
+    plan = [
+        ((256, 256), art_large),
+        ((128, 128), art_large),
+        ((64, 64), art_large),
+        ((48, 48), art_large),
+        ((32, 32), art_small),
+        ((24, 24), art_small),
+        ((16, 16), art_small),
+    ]
+    frames = [(art.resize(size, Image.LANCZOS), size) for size, art in plan]
+    frames[0][0].save(
         OUT_DIR / "icon.ico",
         format="ICO",
-        sizes=sizes,
-        append_images=frames[1:],
+        sizes=[size for _, size in frames],
+        append_images=[img for img, _ in frames[1:]],
     )
     print(f"已生成: {OUT_DIR / 'icon.ico'}")
     print(f"已生成: {OUT_DIR / 'icon.png'}")
