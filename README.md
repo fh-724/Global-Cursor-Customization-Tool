@@ -41,17 +41,15 @@ pyinstaller --onefile --noconsole --name MouseFX windows_mouse_fx.py
 
 Left-click the system tray icon anytime to tweak your setup! 🖱️✨
 
-> ⚠️ **Windows SmartScreen warning**: the exe is not signed with a commercial certificate, so the first launch may show *"Windows protected your PC"*. Click **More info → Run anyway**. You can verify the download against the SHA256 listed on the [Releases](../../releases) page.
+> ⚠️ Windows may show "Windows protected your PC" on first launch — click **More info → Run anyway**.
 
-### 🆘 Cursors Stuck on the Custom Style?
+### 🆘 Cursors stuck?
 
-If MouseFX gets killed hard (Task Manager "End task", `taskkill /F`, or a crash), the cursors may stay customized. Pick any of these:
+If MouseFX got killed, cursors may stay customized:
 
-* **Just relaunch MouseFX** 🧹 — on startup it checks whether the previous session exited cleanly and restores the leftover cursors first.
-* **One-shot restore** ⚡ (no UI): run `MouseFX.exe --restore` and it exits immediately.
-* Log off / reboot, or open **Settings → Mouse → Pointers**, pick any scheme and hit OK.
-
-> 💡 Since v1.0.0, a *graceful* close (Task Manager "End task", or `taskkill` without `/F`) runs the full shutdown path instead of leaving a zombie process behind. `taskkill /F` is a kernel-level kill — the process never gets to run cleanup code, so use one of the three options above in that case.
+* Relaunch MouseFX 🧹
+* Run `MouseFX.exe --restore` ⚡
+* Or log off / reboot
 
 ---
 
@@ -88,18 +86,15 @@ pyinstaller --onefile --noconsole --name MouseFX windows_mouse_fx.py
 
 运行后左键点一下右下角系统托盘图标即可打开控制面板～ 🖱️✨
 
-> ⚠️ **首次运行可能提示「Windows 已保护你的电脑」**：因为 exe 没有购买商业代码签名证书，Windows 会先拦一下。点「**更多信息**」→「**仍要运行**」即可。可以用 [Releases](../../releases) 页里的 SHA256 校验文件是否完整。
+> ⚠️ 首次运行 Windows 可能提示「已保护你的电脑」，点「更多信息」→「仍要运行」。
 
-### 🆘 指针卡在定制样式了？
+### 🆘 指针卡住了？
 
-被强杀（任务管理器「结束任务」、`taskkill /F`、程序崩溃）打断时，系统指针可能没来得及还原。三条路，任选：
+被强杀后指针可能没还原，任选：
 
-* **重新打开 MouseFX** 🧹：启动时会检查上次是否没干净退出，先把残留的定制指针还原掉
-* **命令行一键还原** ⚡（不开界面）：`MouseFX.exe --restore`，跑完立刻退出
-* 还不放心就**注销 / 重启**，或去「设置 → 鼠标 → 指针」随便点个方案再点确定
-
-> 💡 v1.0.0 起，温和关闭（任务管理器「结束任务」、`taskkill` 不带 `/F`）已经会走完整收尾流程，不再留下"界面没了但进程还在"的僵尸实例。
-> `taskkill /F` 属于内核级强杀，进程没有任何机会执行代码，这种情况只能靠上面三种方式补救。
+* 重新打开 MouseFX 🧹
+* 运行 `MouseFX.exe --restore` ⚡
+* 或者注销、重启
 
 ---
 
