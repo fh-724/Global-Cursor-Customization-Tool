@@ -41,6 +41,8 @@ pyinstaller --onefile --noconsole --name MouseFX windows_mouse_fx.py
 
 Left-click the system tray icon anytime to tweak your setup! 🖱️✨
 
+> ⚠️ **Windows SmartScreen warning**: the exe is not signed with a commercial certificate, so the first launch may show *"Windows protected your PC"*. Click **More info → Run anyway**. You can verify the download against the SHA256 listed on the [Releases](../../releases) page.
+
 ### 🆘 Cursors Stuck on the Custom Style?
 
 If MouseFX gets killed hard (Task Manager "End task", `taskkill /F`, or a crash), the cursors may stay customized. Pick any of these:
@@ -85,6 +87,8 @@ pyinstaller --onefile --noconsole --name MouseFX windows_mouse_fx.py
 ```
 
 运行后左键点一下右下角系统托盘图标即可打开控制面板～ 🖱️✨
+
+> ⚠️ **首次运行可能提示「Windows 已保护你的电脑」**：因为 exe 没有购买商业代码签名证书，Windows 会先拦一下。点「**更多信息**」→「**仍要运行**」即可。可以用 [Releases](../../releases) 页里的 SHA256 校验文件是否完整。
 
 ### 🆘 指针卡在定制样式了？
 
