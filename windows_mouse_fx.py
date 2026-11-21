@@ -820,6 +820,9 @@ _SAKURA_UNIT_PATH = build_sakura_petal_path(1.0)
 
 
 class MouseFXOverlay(QWidget):
+    # 这些风格的点击反馈本身已经很明确，不再叠加扩散圆圈（演示模式除外）
+    NO_CLICK_RIPPLE = {"sakura"}
+
     STYLES = {
         "spotlight": "柔光氛围光晕",
         "constellation": "蛛网引力连线",
@@ -1421,37 +1424,39 @@ class MouseFXOverlay(QWidget):
 
     def _spawn_click_fx(self, x: float, y: float, is_right: bool = False) -> None:
         colors = self.get_colors()
-        if self.enable_demo_mode:
-            c_main = QColor("#f43f5e") if is_right else QColor("#22d3ee")
-            c_sub = QColor("#fb7185") if is_right else QColor("#38bdf8")
-            max_mul = 1.25
-        else:
-            c_main = colors[1] if is_right else colors[0]
-            c_sub = colors[0] if is_right else colors[1]
-            max_mul = 1.0
+        # 演示模式靠圆圈区分左右键，必须保留；其余风格若自身反馈已够明显就省掉圆圈
+        if self.enable_demo_mode or self.style_id not in self.NO_CLICK_RIPPLE:
+            if self.enable_demo_mode:
+                c_main = QColor("#f43f5e") if is_right else QColor("#22d3ee")
+                c_sub = QColor("#fb7185") if is_right else QColor("#38bdf8")
+                max_mul = 1.25
+            else:
+                c_main = colors[1] if is_right else colors[0]
+                c_sub = colors[0] if is_right else colors[1]
+                max_mul = 1.0
 
-        self.ripples.append(
-            {
-                "x": x,
-                "y": y,
-                "r": 6.0,
-                "max_r": 95.0 * self.intensity * max_mul,
-                "alpha": 0.94,
-                "width": 2.6 if self.enable_demo_mode else 2.2,
-                "color": c_main,
-            }
-        )
-        self.ripples.append(
-            {
-                "x": x,
-                "y": y,
-                "r": 12.0,
-                "max_r": 135.0 * self.intensity * max_mul,
-                "alpha": 0.48,
-                "width": 1.3,
-                "color": c_sub,
-            }
-        )
+            self.ripples.append(
+                {
+                    "x": x,
+                    "y": y,
+                    "r": 6.0,
+                    "max_r": 95.0 * self.intensity * max_mul,
+                    "alpha": 0.94,
+                    "width": 2.6 if self.enable_demo_mode else 2.2,
+                    "color": c_main,
+                }
+            )
+            self.ripples.append(
+                {
+                    "x": x,
+                    "y": y,
+                    "r": 12.0,
+                    "max_r": 135.0 * self.intensity * max_mul,
+                    "alpha": 0.48,
+                    "width": 1.3,
+                    "color": c_sub,
+                }
+            )
 
         if is_right:
             if self.style_id == "ink":
