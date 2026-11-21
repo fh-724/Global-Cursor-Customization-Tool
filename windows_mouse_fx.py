@@ -19,7 +19,8 @@ Windows 全局桌面鼠标特效悬浮层 (Windows Desktop Mouse FX Overlay - 24
     - 单实例运行保护：重复双击会自动唤醒已运行实例的控制面板，不会重影双开。
     - 全屏自动避让：玩全屏游戏或全屏看视频时自动暂停特效并恢复原生指针，退出全屏自动恢复。
     - 一键场景预设 + 连续滑动条微调（强度 0.4x~2.5x、蒙版 0%~85%）+ 自定义取色器。
-    - 6 种艺术风格 + 6 项可叠加趣味功能（含左右键演示波纹区分）+ 全套 13 种系统指针 + 开机自启。
+    - 6 种艺术风格 + 10 项可叠加趣味功能（含左右键演示波纹区分）+ 全套 13 种系统指针 + 开机自启。
+    - 进程避让 / 滚动打字让位 / 中键激光 / 摇一摇定位 / 配置分享码。
 """
 
 import atexit
@@ -944,8 +945,6 @@ class MouseFXOverlay(QWidget):
         self.was_right_down = False
         self.was_mid_down = False
 
-        self.vel_angle = 0.0
-        self.stretch_factor = 1.0
         self._yield_timer = 0.0
         self.yield_alpha = 1.0
         self._yield_poll_counter = 0
@@ -1010,7 +1009,6 @@ class MouseFXOverlay(QWidget):
         self.enable_water_wake = bool(cfg.get("enable_water_wake", False))
         self.enable_demo_mode = bool(cfg.get("enable_demo_mode", False))
         self.enable_demo_laser = bool(cfg.get("enable_demo_laser", False))
-        self.enable_elastic_motion = bool(cfg.get("enable_elastic_motion", True))
         self.enable_auto_yield = bool(cfg.get("enable_auto_yield", False))
         self.enable_shake_find = bool(cfg.get("enable_shake_find", False))
         self.enable_idle_sleep = bool(cfg.get("enable_idle_sleep", True))
@@ -1131,7 +1129,6 @@ class MouseFXOverlay(QWidget):
                 "enable_water_wake": self.enable_water_wake,
                 "enable_demo_mode": self.enable_demo_mode,
                 "enable_demo_laser": self.enable_demo_laser,
-                "enable_elastic_motion": self.enable_elastic_motion,
                 "enable_auto_yield": self.enable_auto_yield,
                 "enable_shake_find": self.enable_shake_find,
                 "enable_idle_sleep": self.enable_idle_sleep,
@@ -1273,7 +1270,6 @@ class MouseFXOverlay(QWidget):
             "enable_water_wake": self.enable_water_wake,
             "enable_demo_mode": self.enable_demo_mode,
             "enable_demo_laser": self.enable_demo_laser,
-            "enable_elastic_motion": self.enable_elastic_motion,
             "enable_auto_yield": self.enable_auto_yield,
             "enable_shake_find": self.enable_shake_find,
             "enable_idle_sleep": self.enable_idle_sleep,
@@ -1644,16 +1640,6 @@ class MouseFXOverlay(QWidget):
             self.idle_alpha = max(0.0, self.idle_alpha - 0.025 * dt_scale)
         else:
             self.idle_alpha = min(1.0, self.idle_alpha + 0.14 * dt_scale)
-
-        # 速度弹性形变（沿运动方向轻微拉伸，停下后回弹）
-        if self.enable_elastic_motion and moved > 1.0:
-            target_ang = math.degrees(math.atan2(dy, dx))
-            ang_diff = (target_ang - self.vel_angle + 180.0) % 360.0 - 180.0
-            self.vel_angle += ang_diff * dt_lerp(0.32, dt_scale)
-            target_stretch = min(1.38, 1.0 + inst_speed * 0.012)
-        else:
-            target_stretch = 1.0
-        self.stretch_factor += (target_stretch - self.stretch_factor) * dt_lerp(0.24, dt_scale)
 
         # 滚动 / 打字自动让位
         if self.enable_auto_yield:
@@ -2213,10 +2199,6 @@ class MouseFXOverlay(QWidget):
 
             painter.save()
             painter.translate(self.ring_pos)
-            if self.enable_elastic_motion and self.stretch_factor > 1.01:
-                painter.rotate(self.vel_angle)
-                painter.scale(self.stretch_factor, 1.0 / math.sqrt(self.stretch_factor))
-                painter.rotate(-self.vel_angle)
 
             rim_base = QColor(255, 255, 255, int(38 * vis))
             painter.setPen(QPen(rim_base, 1.0 * scale))
@@ -2347,10 +2329,6 @@ class MouseFXOverlay(QWidget):
 
                 painter.save()
                 painter.translate(self.ring_pos)
-                if self.enable_elastic_motion and self.stretch_factor > 1.01:
-                    painter.rotate(self.vel_angle)
-                    painter.scale(self.stretch_factor, 1.0 / math.sqrt(self.stretch_factor))
-                    painter.rotate(-self.vel_angle)
                 glow_c = QColor(colors[0])
                 glow_c.setAlphaF(0.28 * vis)
                 painter.setPen(QPen(glow_c, 6.0 * scale))
@@ -2736,7 +2714,6 @@ class ControlPanel(QWidget):
             ("点击礼花火花", "enable_fireworks"),
             ("环绕跟宠小光灵", "enable_pet_orb"),
             ("手电筒透光蒙版", "enable_flashlight"),
-            ("速度弹性形变", "enable_elastic_motion"),
             ("演示模式（左青右粉）", "enable_demo_mode"),
             ("演示中键激光尾迹", "enable_demo_laser"),
             ("静止 2.6 秒休眠", "enable_idle_sleep"),
