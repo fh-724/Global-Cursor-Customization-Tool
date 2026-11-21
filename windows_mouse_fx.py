@@ -2478,6 +2478,49 @@ class MouseFXOverlay(QWidget):
             painter.drawEllipse(QPointF(fh["x"], fh["y"]), fh["r"], fh["r"])
 
 
+class CollapsibleSection(QWidget):
+    """带箭头的可折叠分组，用来收拢控制面板里占地方的多选项。"""
+
+    def __init__(self, title: str, expanded: bool = False, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.title = title
+        self._expanded = expanded
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(2)
+
+        self.header = QPushButton()
+        self.header.setObjectName("SectionToggle")
+        self.header.setCheckable(True)
+        self.header.setChecked(expanded)
+        self.header.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.header.clicked.connect(self.toggle)
+        root.addWidget(self.header)
+
+        self.body = QWidget()
+        self.content = QVBoxLayout(self.body)
+        self.content.setContentsMargins(12, 2, 0, 6)
+        self.content.setSpacing(5)
+        self.body.setVisible(expanded)
+        root.addWidget(self.body)
+
+        self._refresh_header()
+
+    def _refresh_header(self) -> None:
+        arrow = "▾" if self._expanded else "▸"
+        self.header.setText(f"{arrow}  {self.title}")
+
+    def toggle(self) -> None:
+        self.set_expanded(not self._expanded)
+
+    def set_expanded(self, expanded: bool) -> None:
+        self._expanded = expanded
+        self.body.setVisible(expanded)
+        self.header.setChecked(expanded)
+        self._refresh_header()
+
+
 class ControlPanel(QWidget):
     """独立可视化控制面板（支持场景预设、连续滑动条、自定义取色与全套设置）。"""
 
@@ -2506,6 +2549,18 @@ class ControlPanel(QWidget):
                 font-size: 12px;
                 font-weight: bold;
                 margin-top: 4px;
+            }
+            QPushButton#SectionToggle {
+                text-align: left;
+                border: none;
+                background: transparent;
+                color: #a1a1aa;
+                font-size: 12px;
+                font-weight: bold;
+                padding: 5px 0px;
+            }
+            QPushButton#SectionToggle:hover {
+                color: #e4e4e7;
             }
             QComboBox {
                 background-color: #1e1e24;
@@ -2648,9 +2703,7 @@ class ControlPanel(QWidget):
         line.setStyleSheet("color: #27272f;")
         layout.addWidget(line)
 
-        fun_label = QLabel("趣味功能（可自由叠加）")
-        fun_label.setObjectName("SectionTitle")
-        layout.addWidget(fun_label)
+        fun_section = CollapsibleSection("趣味功能（可叠加）")
 
         self._fun_cbs: dict[str, QCheckBox] = {}
         fun_grid = QGridLayout()
@@ -2673,20 +2726,23 @@ class ControlPanel(QWidget):
             cb.toggled.connect(lambda checked, a=attr: overlay.set_fun_option(a, checked))
             fun_grid.addWidget(cb, idx // 2, idx % 2)
             self._fun_cbs[attr] = cb
-        layout.addLayout(fun_grid)
+        fun_section.content.addLayout(fun_grid)
+        layout.addWidget(fun_section)
 
         line2 = QFrame()
         line2.setFrameShape(QFrame.Shape.HLine)
         line2.setStyleSheet("color: #27272f;")
         layout.addWidget(line2)
 
+        behavior_section = CollapsibleSection("行为与兼容")
+
         self.cursor_cb = QCheckBox("随风格切换全套专属鼠标指针图标")
         self.cursor_cb.toggled.connect(overlay.set_custom_cursor_enabled)
-        layout.addWidget(self.cursor_cb)
+        behavior_section.content.addWidget(self.cursor_cb)
 
         self.fs_avoid_cb = QCheckBox("全屏游戏 / 看视频时自动避让暂停")
         self.fs_avoid_cb.toggled.connect(overlay.set_fullscreen_avoid)
-        layout.addWidget(self.fs_avoid_cb)
+        behavior_section.content.addWidget(self.fs_avoid_cb)
 
         proc_row = QHBoxLayout()
         proc_row.setSpacing(6)
@@ -2700,15 +2756,21 @@ class ControlPanel(QWidget):
         self.proc_edit.editingFinished.connect(self._on_proc_avoid_changed)
         proc_row.addWidget(self.proc_avoid_cb)
         proc_row.addWidget(self.proc_edit, 1)
-        layout.addLayout(proc_row)
+        behavior_section.content.addLayout(proc_row)
 
         self.topmost_cb = QCheckBox("特效覆盖所有窗口（强制置于最顶层）")
         self.topmost_cb.toggled.connect(overlay.set_always_on_top_force)
-        layout.addWidget(self.topmost_cb)
+        behavior_section.content.addWidget(self.topmost_cb)
 
         self.autostart_cb = QCheckBox("Windows 开机自启")
         self.autostart_cb.toggled.connect(self._on_autostart_toggled)
-        layout.addWidget(self.autostart_cb)
+        behavior_section.content.addWidget(self.autostart_cb)
+
+        layout.addWidget(behavior_section)
+
+        share_label = QLabel("配置分享")
+        share_label.setObjectName("SectionTitle")
+        layout.addWidget(share_label)
 
         share_row = QHBoxLayout()
         share_row.setSpacing(6)
