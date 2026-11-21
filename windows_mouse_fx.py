@@ -2705,7 +2705,7 @@ class ControlPanel(QWidget):
         line.setStyleSheet("color: #27272f;")
         layout.addWidget(line)
 
-        fun_dropdown = DropdownPanel("趣味功能  · 已开 0 项", min_width=380)
+        fun_dropdown = DropdownPanel("趣味功能", min_width=380)
         self._fun_dropdown = fun_dropdown
         self._fun_cbs: dict[str, QCheckBox] = {}
         fun_grid = QGridLayout()
@@ -2726,7 +2726,6 @@ class ControlPanel(QWidget):
         for idx, (title, attr) in enumerate(fun_items):
             cb = QCheckBox(title)
             cb.toggled.connect(lambda checked, a=attr: overlay.set_fun_option(a, checked))
-            cb.toggled.connect(lambda _c: self._refresh_fun_title())
             fun_grid.addWidget(cb, idx // 2, idx % 2)
             self._fun_cbs[attr] = cb
         fun_dropdown.content.addLayout(fun_grid)
@@ -2808,10 +2807,6 @@ class ControlPanel(QWidget):
 
         self.sync_from_overlay()
 
-    def _refresh_fun_title(self) -> None:
-        n = sum(1 for cb in self._fun_cbs.values() if cb.isChecked())
-        self._fun_dropdown.setText(f"趣味功能  · 已开 {n} 项  ▾")
-
     def sync_from_overlay(self) -> None:
         for w in (
             self.style_combo,
@@ -2864,7 +2859,6 @@ class ControlPanel(QWidget):
         ):
             w.blockSignals(False)
 
-        self._refresh_fun_title()
 
     def _on_preset_clicked(self, preset_id: str) -> None:
         self.overlay.apply_preset(preset_id)
