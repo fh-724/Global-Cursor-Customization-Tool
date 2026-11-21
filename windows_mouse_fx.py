@@ -694,6 +694,9 @@ def build_sakura_petal_path(size: float) -> QPainterPath:
     return path
 
 
+_SAKURA_UNIT_PATH = build_sakura_petal_path(1.0)
+
+
 class MouseFXOverlay(QWidget):
     STYLES = {
         "spotlight": "柔光氛围光晕",
@@ -779,8 +782,10 @@ class MouseFXOverlay(QWidget):
 
         self.paused = False
         self.auto_avoiding = False
-        self.topmost_tick_counter = 0
+        self._last_fg_hwnd = 0
         self.fullscreen_check_counter = 0
+        self._idle_throttled = False
+        self._cached_colors: list[QColor] = []
         self.protected_widget: QWidget | None = None
 
         self.setWindowFlags(
@@ -874,6 +879,7 @@ class MouseFXOverlay(QWidget):
         self.enable_fullscreen_avoid = bool(cfg.get("enable_fullscreen_avoid", True))
         self.always_on_top_force = bool(cfg.get("always_on_top_force", True))
         self.enable_custom_cursor = bool(cfg.get("enable_custom_cursor", True))
+        self._rebuild_color_cache()
 
     def reset_to_defaults(self) -> None:
         self._apply_defaults({})
@@ -900,6 +906,7 @@ class MouseFXOverlay(QWidget):
         self._clear_all_particles()
         self.idle_seconds = 0.0
         self.idle_alpha = 1.0
+        self._rebuild_color_cache()
         self.refresh_cursor_icon()
         self.persist_config()
         self.update()
@@ -996,17 +1003,28 @@ class MouseFXOverlay(QWidget):
                 }
             )
 
+    def _rebuild_color_cache(self) -> None:
+        if self.palette_id == "custom":
+            c0 = QColor(self.custom_colors[0])
+            c1 = QColor(self.custom_colors[1])
+            self._cached_colors = [
+                c0,
+                c1,
+                blend_color(c0, c1, 0.5),
+                blend_color(c1, QColor("#ffffff"), 0.3),
+            ]
+        elif self.palette_id != "aurora":
+            self._cached_colors = [QColor(c) for c in self.PALETTES[self.palette_id]["colors"]]
+
     def get_colors(self) -> list[QColor]:
         if self.palette_id == "aurora":
             return [
                 QColor.fromHsvF((self.hue_phase + i * 0.18) % 1.0, 0.82, 1.0)
                 for i in range(4)
             ]
-        if self.palette_id == "custom":
-            c0 = QColor(self.custom_colors[0])
-            c1 = QColor(self.custom_colors[1])
-            return [c0, c1, blend_color(c0, c1, 0.5), blend_color(c1, QColor("#ffffff"), 0.3)]
-        return [QColor(c) for c in self.PALETTES[self.palette_id]["colors"]]
+        if not self._cached_colors:
+            self._rebuild_color_cache()
+        return self._cached_colors
 
     def set_style(self, style_id: str) -> None:
         if style_id in self.STYLES:
@@ -1025,6 +1043,7 @@ class MouseFXOverlay(QWidget):
     def set_palette(self, palette_id: str) -> None:
         if palette_id in self.PALETTES:
             self.palette_id = palette_id
+            self._rebuild_color_cache()
             self.refresh_cursor_icon()
             self.persist_config()
             self.update()
@@ -1032,6 +1051,7 @@ class MouseFXOverlay(QWidget):
     def set_custom_colors(self, primary_hex: str, secondary_hex: str) -> None:
         self.custom_colors = [primary_hex, secondary_hex]
         self.palette_id = "custom"
+        self._rebuild_color_cache()
         self.refresh_cursor_icon()
         self.persist_config()
         self.update()
@@ -1263,14 +1283,44 @@ class MouseFXOverlay(QWidget):
                     n["vx"] += (dx / dist) * force
                     n["vy"] += (dy / dist) * force
 
+    def _has_active_animations(self) -> bool:
+        return bool(
+            self.ripples
+            or self.sparks
+            or self.trail
+            or self.sakura_petals
+            or self.ink_strokes
+            or self.ink_blooms
+            or self.cinnabar_dots
+            or self.water_wake_pts
+            or self.water_waves
+            or self.water_droplets
+            or abs(self.dark_mask_alpha - self.current_mask_alpha) >= 0.4
+        )
+
+    def _set_idle_throttle(self, throttled: bool) -> None:
+        if throttled != self._idle_throttled:
+            self._idle_throttled = throttled
+            self.timer.setInterval(16 if throttled else 6)
+            if not throttled:
+                self.last_tick_time = time.perf_counter()
+
     def on_tick(self) -> None:
         if self.paused:
             return
 
-        # 全屏应用自动避让检测（约每 360ms 检查一次）
+        # 仅在前台窗口切换瞬间按需重申置顶/沉底，避免无意义系统消息
+        if sys.platform == "win32":
+            fg_hwnd = ctypes.windll.user32.GetForegroundWindow()
+            if fg_hwnd and fg_hwnd != self._last_fg_hwnd:
+                self._last_fg_hwnd = fg_hwnd
+                apply_windows_topmost(int(self.winId()), self.always_on_top_force)
+
+        # 全屏应用自动避让检测（约每 350ms 检查一次）
         if self.enable_fullscreen_avoid:
             self.fullscreen_check_counter += 1
-            if self.fullscreen_check_counter >= 60:
+            check_limit = 22 if self._idle_throttled else 60
+            if self.fullscreen_check_counter >= check_limit:
                 self.fullscreen_check_counter = 0
                 ignore = {int(self.winId())}
                 if self.protected_widget is not None:
@@ -1283,12 +1333,23 @@ class MouseFXOverlay(QWidget):
                     self.refresh_cursor_icon()
                     self.update()
         if self.auto_avoiding:
+            self._set_idle_throttle(True)
             return
 
-        self.topmost_tick_counter += 1
-        if self.topmost_tick_counter >= 45:
-            self.topmost_tick_counter = 0
-            apply_windows_topmost(int(self.winId()), self.always_on_top_force)
+        # 处于休眠态时，仅以 16ms 极轻量化检测鼠标移动或点击以唤醒，完全跳过计算与重绘
+        if self._idle_throttled:
+            local_pos = self.mapFromGlobal(QCursor.pos())
+            left_down = is_mouse_button_down(0x01)
+            right_down = is_mouse_button_down(0x02)
+            if (
+                abs(local_pos.x() - self.mouse_pos.x()) <= 0.6
+                and abs(local_pos.y() - self.mouse_pos.y()) <= 0.6
+                and not left_down
+                and not right_down
+                and not self._has_active_animations()
+            ):
+                return
+            self._set_idle_throttle(False)
 
         now = time.perf_counter()
         dt_sec = max(0.001, min(0.05, now - self.last_tick_time))
@@ -1534,6 +1595,11 @@ class MouseFXOverlay(QWidget):
             sp["vx"] *= 0.97 ** dt_scale
             sp["alpha"] -= 0.025 * dt_scale
         self.sparks = [sp for sp in self.sparks if sp["alpha"] > 0.02]
+
+        if self.idle_alpha <= 0.01 and not self._has_active_animations():
+            self._set_idle_throttle(True)
+            self.update()  # 最后一帧确保完全淡出清屏
+            return
 
         self.update()
 
@@ -1817,14 +1883,16 @@ class MouseFXOverlay(QWidget):
                 flip_scale = max(0.22, abs(math.cos(p["flip"])))
                 painter.scale(1.0, flip_scale)
 
-                petal_path = build_sakura_petal_path(p["size"])
+                painter.scale(p["size"], p["size"])
                 c_fill = QColor(p["color"])
                 c_fill.setAlphaF(max(0.0, min(1.0, p["alpha"])))
                 c_rim = QColor("#ffffff")
                 c_rim.setAlphaF(max(0.0, min(1.0, p["alpha"] * 0.65)))
-                painter.setPen(QPen(c_rim, 0.8))
+                rim_pen = QPen(c_rim, 0.8)
+                rim_pen.setCosmetic(True)
+                painter.setPen(rim_pen)
                 painter.setBrush(QBrush(c_fill))
-                painter.drawPath(petal_path)
+                painter.drawPath(_SAKURA_UNIT_PATH)
                 painter.restore()
             painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Plus)
 
