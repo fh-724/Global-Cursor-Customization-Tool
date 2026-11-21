@@ -821,7 +821,7 @@ _SAKURA_UNIT_PATH = build_sakura_petal_path(1.0)
 
 class MouseFXOverlay(QWidget):
     # 这些风格的点击反馈本身已经很明确，不再叠加扩散圆圈（演示模式除外）
-    NO_CLICK_RIPPLE = {"sakura"}
+    NO_CLICK_RIPPLE = {"sakura", "ink"}
 
     STYLES = {
         "spotlight": "柔光氛围光晕",
