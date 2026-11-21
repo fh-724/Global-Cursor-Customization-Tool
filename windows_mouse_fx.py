@@ -23,6 +23,7 @@ Windows 全局桌面鼠标特效悬浮层 (Windows Desktop Mouse FX Overlay - 24
 """
 
 import atexit
+import base64
 import ctypes
 from ctypes import wintypes
 import json
@@ -32,6 +33,7 @@ from pathlib import Path
 import random
 import sys
 import time
+import zlib
 from PyQt6.QtCore import QPointF, QRect, QRectF, QTimer, Qt
 from PyQt6.QtGui import (
     QAction,
@@ -58,8 +60,11 @@ from PyQt6.QtWidgets import (
     QFrame,
     QGridLayout,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
+    QLineEdit,
     QMenu,
+    QMessageBox,
     QPushButton,
     QSlider,
     QSystemTrayIcon,
@@ -269,6 +274,98 @@ def is_foreground_fullscreen(ignore_hwnds: set[int]) -> bool:
         return False
 
 
+def get_foreground_process_name(ignore_hwnds: set[int]) -> str:
+    """获取当前前台窗口所属进程名（小写，如 photoshop.exe），失败返回空串。"""
+    if sys.platform != "win32":
+        return ""
+    try:
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+        hwnd = user32.GetForegroundWindow()
+        if not hwnd or int(hwnd) in ignore_hwnds:
+            return ""
+        pid = wintypes.DWORD(0)
+        user32.GetWindowThreadProcessId(ctypes.c_void_p(hwnd), ctypes.byref(pid))
+        if not pid.value:
+            return ""
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        kernel32.OpenProcess.restype = ctypes.c_void_p
+        hproc = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid.value)
+        if not hproc:
+            return ""
+        try:
+            buf = ctypes.create_unicode_buffer(512)
+            size = wintypes.DWORD(512)
+            if kernel32.QueryFullProcessImageNameW(ctypes.c_void_p(hproc), 0, buf, ctypes.byref(size)):
+                return os.path.basename(buf.value).lower()
+        finally:
+            kernel32.CloseHandle(ctypes.c_void_p(hproc))
+    except Exception:
+        pass
+    return ""
+
+
+_wheel_hook_handle = None
+_wheel_hook_proc = None
+_last_wheel_event_time = 0.0
+_TYPING_VKS = (0x08, 0x0D, 0x20, *range(0x30, 0x5B))
+
+
+def is_typing_active() -> bool:
+    """轻量检测是否有常规打字按键输入（仅在开启自动让位时轮询）。"""
+    if sys.platform != "win32":
+        return False
+    try:
+        get_state = ctypes.windll.user32.GetAsyncKeyState
+        for vk in _TYPING_VKS:
+            if get_state(vk) & 0x0001:
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def install_wheel_hook() -> None:
+    """安装极简全局滚轮时间戳钩子（仅记录滚轮时间，不拦截任何事件）。"""
+    global _wheel_hook_handle, _wheel_hook_proc
+    if sys.platform != "win32" or _wheel_hook_handle:
+        return
+    try:
+        user32 = ctypes.windll.user32
+        WH_MOUSE_LL = 14
+        WM_MOUSEWHEEL = 0x020A
+        WM_MOUSEHWHEEL = 0x020E
+        HOOKPROC = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM)
+        user32.SetWindowsHookExW.argtypes = [ctypes.c_int, HOOKPROC, ctypes.c_void_p, wintypes.DWORD]
+        user32.SetWindowsHookExW.restype = ctypes.c_void_p
+        user32.CallNextHookEx.argtypes = [ctypes.c_void_p, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM]
+        user32.CallNextHookEx.restype = ctypes.c_ssize_t
+
+        def _proc(n_code: int, w_param: int, l_param: int) -> int:
+            global _last_wheel_event_time
+            if n_code >= 0 and w_param in (WM_MOUSEWHEEL, WM_MOUSEHWHEEL):
+                _last_wheel_event_time = time.perf_counter()
+            return user32.CallNextHookEx(None, n_code, w_param, l_param)
+
+        _wheel_hook_proc = HOOKPROC(_proc)
+        _wheel_hook_handle = user32.SetWindowsHookExW(WH_MOUSE_LL, _wheel_hook_proc, None, 0)
+    except Exception:
+        _wheel_hook_handle = None
+        _wheel_hook_proc = None
+
+
+def uninstall_wheel_hook() -> None:
+    global _wheel_hook_handle, _wheel_hook_proc
+    if sys.platform != "win32" or not _wheel_hook_handle:
+        return
+    try:
+        ctypes.windll.user32.UnhookWindowsHookEx(ctypes.c_void_p(_wheel_hook_handle))
+    except Exception:
+        pass
+    _wheel_hook_handle = None
+    _wheel_hook_proc = None
+
+
 def restore_system_cursors() -> None:
     """恢复 Windows 默认全套系统鼠标指针。"""
     if sys.platform != "win32":
@@ -397,6 +494,7 @@ def shutdown_and_restore() -> None:
     if _shutdown_done:
         return
     _shutdown_done = True
+    uninstall_wheel_hook()
     if _instance_mutex_handle:
         restore_system_cursors()
         clear_session_lock()
@@ -428,7 +526,10 @@ def _render_normal_cursor_image(
         p.drawEllipse(QPointF(16, 16), r_glow, r_glow)
 
         r_dot = 6.2 if is_hand else 5.0
-        p.setPen(QPen(QColor("#ffffff"), 1.3))
+        p.setPen(QPen(QColor(76, 5, 25, 165), 2.4))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawEllipse(QPointF(16, 16), r_dot, r_dot)
+        p.setPen(QPen(QColor("#ffffff"), 1.2))
         p.setBrush(QBrush(QColor("#f472b6" if is_hand else "#f9a8d4")))
         p.drawEllipse(QPointF(16, 16), r_dot, r_dot)
 
@@ -443,6 +544,9 @@ def _render_normal_cursor_image(
         nib = QPainterPath(QPointF(3, 3))
         nib.cubicTo(QPointF(5, 13), QPointF(10, 17), QPointF(16, 16))
         nib.cubicTo(QPointF(17, 10), QPointF(13, 5), QPointF(3, 3))
+        p.setPen(QPen(QColor(24, 24, 27, 155), 2.3))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawPath(nib)
         p.setPen(QPen(QColor("#f5f5f4"), 1.2))
         p.setBrush(QBrush(QColor("#b91c1c" if is_hand else "#18181b")))
         p.drawPath(nib)
@@ -454,6 +558,11 @@ def _render_normal_cursor_image(
         grad.setColorAt(0.0, QColor(255, 255, 255, 235))
         grad.setColorAt(0.55, QColor(accent.red(), accent.green(), accent.blue(), 185))
         grad.setColorAt(1.0, QColor(secondary.red(), secondary.green(), secondary.blue(), 200))
+        p.setPen(
+            QPen(QColor(15, 23, 42, 165), 2.6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+        )
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawPolygon(poly)
         p.setPen(
             QPen(QColor("#ffffff"), 1.4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
         )
@@ -477,6 +586,11 @@ def _render_normal_cursor_image(
         hx, hy = 4, 4
         poly = QPolygonF([QPointF(4, 4), QPointF(19, 13), QPointF(11, 14), QPointF(9, 22)])
         p.setPen(
+            QPen(QColor(15, 23, 42, 165), 2.8, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+        )
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawPolygon(poly)
+        p.setPen(
             QPen(accent, 1.6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
         )
         p.setBrush(QBrush(QColor("#ffffff")))
@@ -495,6 +609,11 @@ def _render_normal_cursor_image(
         p.drawEllipse(QPointF(7, 7), 10, 10)
 
         poly = QPolygonF([QPointF(4, 4), QPointF(20, 13), QPointF(12, 14), QPointF(10, 22)])
+        p.setPen(
+            QPen(QColor(15, 23, 42, 165), 2.7, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+        )
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawPolygon(poly)
         p.setPen(
             QPen(accent, 1.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
         )
@@ -821,6 +940,17 @@ class MouseFXOverlay(QWidget):
         self.is_dragging = False
         self.was_left_down = False
         self.was_right_down = False
+        self.was_mid_down = False
+
+        self.vel_angle = 0.0
+        self.stretch_factor = 1.0
+        self._yield_timer = 0.0
+        self.yield_alpha = 1.0
+        self._yield_poll_counter = 0
+        self._last_seen_wheel_ts = 0.0
+        self._shake_flips: list[float] = []
+        self._last_shake_sign = 0
+        self._shake_cooldown_until = 0.0
 
         self.idle_seconds = 0.0
         self.idle_alpha = 1.0
@@ -836,6 +966,8 @@ class MouseFXOverlay(QWidget):
         self.water_droplets: list[dict] = []
         self.ripples: list[dict] = []
         self.sparks: list[dict] = []
+        self.laser_points: list[dict] = []
+        self.find_halos: list[dict] = []
         self.nodes: list[dict] = []
         self._init_nodes()
 
@@ -875,10 +1007,25 @@ class MouseFXOverlay(QWidget):
         self.enable_flashlight = bool(cfg.get("enable_flashlight", False))
         self.enable_water_wake = bool(cfg.get("enable_water_wake", False))
         self.enable_demo_mode = bool(cfg.get("enable_demo_mode", False))
+        self.enable_demo_laser = bool(cfg.get("enable_demo_laser", False))
+        self.enable_elastic_motion = bool(cfg.get("enable_elastic_motion", True))
+        self.enable_auto_yield = bool(cfg.get("enable_auto_yield", False))
+        self.enable_shake_find = bool(cfg.get("enable_shake_find", False))
         self.enable_idle_sleep = bool(cfg.get("enable_idle_sleep", True))
         self.enable_fullscreen_avoid = bool(cfg.get("enable_fullscreen_avoid", True))
+        self.enable_process_avoid = bool(cfg.get("enable_process_avoid", False))
+        raw_procs = cfg.get("avoid_processes", ["photoshop.exe", "blender.exe", "cs2.exe"])
+        if isinstance(raw_procs, list):
+            self.avoid_processes = [str(x).strip().lower() for x in raw_procs if str(x).strip()]
+        else:
+            self.avoid_processes = ["photoshop.exe", "blender.exe", "cs2.exe"]
+        self._avoid_proc_set = set(self.avoid_processes)
         self.always_on_top_force = bool(cfg.get("always_on_top_force", True))
         self.enable_custom_cursor = bool(cfg.get("enable_custom_cursor", True))
+        if self.enable_auto_yield:
+            install_wheel_hook()
+        else:
+            uninstall_wheel_hook()
         self._rebuild_color_cache()
 
     def reset_to_defaults(self) -> None:
@@ -922,6 +1069,8 @@ class MouseFXOverlay(QWidget):
         self.water_droplets.clear()
         self.ripples.clear()
         self.sparks.clear()
+        self.laser_points.clear()
+        self.find_halos.clear()
 
     def _sync_virtual_geometry(self) -> None:
         primary = QApplication.primaryScreen()
@@ -979,8 +1128,14 @@ class MouseFXOverlay(QWidget):
                 "enable_flashlight": self.enable_flashlight,
                 "enable_water_wake": self.enable_water_wake,
                 "enable_demo_mode": self.enable_demo_mode,
+                "enable_demo_laser": self.enable_demo_laser,
+                "enable_elastic_motion": self.enable_elastic_motion,
+                "enable_auto_yield": self.enable_auto_yield,
+                "enable_shake_find": self.enable_shake_find,
                 "enable_idle_sleep": self.enable_idle_sleep,
                 "enable_fullscreen_avoid": self.enable_fullscreen_avoid,
+                "enable_process_avoid": self.enable_process_avoid,
+                "avoid_processes": self.avoid_processes,
                 "always_on_top_force": self.always_on_top_force,
                 "enable_custom_cursor": self.enable_custom_cursor,
             }
@@ -1083,11 +1238,79 @@ class MouseFXOverlay(QWidget):
 
     def set_fullscreen_avoid(self, enabled: bool) -> None:
         self.enable_fullscreen_avoid = bool(enabled)
-        if not self.enable_fullscreen_avoid and self.auto_avoiding:
+        if not self.enable_fullscreen_avoid and not self.enable_process_avoid and self.auto_avoiding:
             self.auto_avoiding = False
             self.refresh_cursor_icon()
             self.update()
         self.persist_config()
+
+    def set_process_avoid(self, enabled: bool, proc_text: str | None = None) -> None:
+        self.enable_process_avoid = bool(enabled)
+        if proc_text is not None:
+            items = [s.strip().lower() for s in proc_text.replace("，", ",").split(",") if s.strip()]
+            self.avoid_processes = items
+            self._avoid_proc_set = set(items)
+        if not self.enable_fullscreen_avoid and not self.enable_process_avoid and self.auto_avoiding:
+            self.auto_avoiding = False
+            self.refresh_cursor_icon()
+            self.update()
+        self.persist_config()
+
+    def _snapshot_config(self) -> dict:
+        return {
+            "style_id": self.style_id,
+            "palette_id": self.palette_id,
+            "custom_colors": self.custom_colors,
+            "intensity": round(self.intensity, 2),
+            "dark_mask_alpha": self.dark_mask_alpha,
+            "exclude_taskbar_mask": self.exclude_taskbar_mask,
+            "enable_ribbon": self.enable_ribbon,
+            "enable_fireworks": self.enable_fireworks,
+            "enable_pet_orb": self.enable_pet_orb,
+            "enable_flashlight": self.enable_flashlight,
+            "enable_water_wake": self.enable_water_wake,
+            "enable_demo_mode": self.enable_demo_mode,
+            "enable_demo_laser": self.enable_demo_laser,
+            "enable_elastic_motion": self.enable_elastic_motion,
+            "enable_auto_yield": self.enable_auto_yield,
+            "enable_shake_find": self.enable_shake_find,
+            "enable_idle_sleep": self.enable_idle_sleep,
+            "enable_fullscreen_avoid": self.enable_fullscreen_avoid,
+            "enable_process_avoid": self.enable_process_avoid,
+            "avoid_processes": self.avoid_processes,
+            "always_on_top_force": self.always_on_top_force,
+            "enable_custom_cursor": self.enable_custom_cursor,
+        }
+
+    def export_config_code(self) -> str:
+        raw = json.dumps(self._snapshot_config(), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        token = base64.urlsafe_b64encode(zlib.compress(raw, level=9)).decode("ascii")
+        return f"MFX1:{token}"
+
+    def import_config_code(self, text: str) -> bool:
+        s = text.strip()
+        if not s:
+            return False
+        try:
+            if s.startswith("MFX1:"):
+                payload = zlib.decompress(base64.urlsafe_b64decode(s[5:].encode("ascii"))).decode("utf-8")
+                data = json.loads(payload)
+            else:
+                data = json.loads(s)
+            if not isinstance(data, dict):
+                return False
+            self._apply_defaults(data)
+            self._clear_all_particles()
+            self.idle_seconds = 0.0
+            self.idle_alpha = 1.0
+            self.yield_alpha = 1.0
+            apply_windows_topmost(int(self.winId()), self.always_on_top_force)
+            self.refresh_cursor_icon()
+            self.persist_config()
+            self.update()
+            return True
+        except Exception:
+            return False
 
     def set_fun_option(self, attr: str, enabled: bool) -> None:
         val = bool(enabled)
@@ -1102,6 +1325,13 @@ class MouseFXOverlay(QWidget):
             self.water_droplets.clear()
         if attr == "enable_idle_sleep" and not val:
             self.idle_alpha = 1.0
+        elif attr == "enable_auto_yield":
+            if val:
+                install_wheel_hook()
+            else:
+                uninstall_wheel_hook()
+                self._yield_timer = 0.0
+                self.yield_alpha = 1.0
         self.persist_config()
         self.update()
 
@@ -1295,6 +1525,8 @@ class MouseFXOverlay(QWidget):
             or self.water_wake_pts
             or self.water_waves
             or self.water_droplets
+            or self.laser_points
+            or self.find_halos
             or abs(self.dark_mask_alpha - self.current_mask_alpha) >= 0.4
         )
 
@@ -1316,8 +1548,8 @@ class MouseFXOverlay(QWidget):
                 self._last_fg_hwnd = fg_hwnd
                 apply_windows_topmost(int(self.winId()), self.always_on_top_force)
 
-        # 全屏应用自动避让检测（约每 350ms 检查一次）
-        if self.enable_fullscreen_avoid:
+        # 全屏与进程白名单自动避让检测（约每 350ms 检查一次）
+        if self.enable_fullscreen_avoid or (self.enable_process_avoid and self._avoid_proc_set):
             self.fullscreen_check_counter += 1
             check_limit = 22 if self._idle_throttled else 60
             if self.fullscreen_check_counter >= check_limit:
@@ -1325,10 +1557,17 @@ class MouseFXOverlay(QWidget):
                 ignore = {int(self.winId())}
                 if self.protected_widget is not None:
                     ignore.add(int(self.protected_widget.winId()))
-                fs = is_foreground_fullscreen(ignore)
-                if fs != self.auto_avoiding:
-                    self.auto_avoiding = fs
-                    if fs:
+                fs = self.enable_fullscreen_avoid and is_foreground_fullscreen(ignore)
+                proc_hit = (
+                    not fs
+                    and self.enable_process_avoid
+                    and bool(self._avoid_proc_set)
+                    and get_foreground_process_name(ignore) in self._avoid_proc_set
+                )
+                should_avoid = fs or proc_hit
+                if should_avoid != self.auto_avoiding:
+                    self.auto_avoiding = should_avoid
+                    if should_avoid:
                         self._clear_all_particles()
                     self.refresh_cursor_icon()
                     self.update()
@@ -1398,6 +1637,65 @@ class MouseFXOverlay(QWidget):
             self.idle_alpha = max(0.0, self.idle_alpha - 0.025 * dt_scale)
         else:
             self.idle_alpha = min(1.0, self.idle_alpha + 0.14 * dt_scale)
+
+        # 速度弹性形变（沿运动方向轻微拉伸，停下后回弹）
+        if self.enable_elastic_motion and moved > 1.0:
+            target_ang = math.degrees(math.atan2(dy, dx))
+            ang_diff = (target_ang - self.vel_angle + 180.0) % 360.0 - 180.0
+            self.vel_angle += ang_diff * dt_lerp(0.32, dt_scale)
+            target_stretch = min(1.38, 1.0 + inst_speed * 0.012)
+        else:
+            target_stretch = 1.0
+        self.stretch_factor += (target_stretch - self.stretch_factor) * dt_lerp(0.24, dt_scale)
+
+        # 滚动 / 打字自动让位
+        if self.enable_auto_yield:
+            self._yield_poll_counter += 1
+            if _last_wheel_event_time > self._last_seen_wheel_ts:
+                self._last_seen_wheel_ts = _last_wheel_event_time
+                self._yield_timer = 0.85
+            elif self._yield_poll_counter >= 3:
+                self._yield_poll_counter = 0
+                if is_typing_active():
+                    self._yield_timer = 0.95
+            if self._yield_timer > 0.0:
+                self._yield_timer = max(0.0, self._yield_timer - dt_sec)
+                self.yield_alpha = max(0.0, self.yield_alpha - 0.16 * dt_scale)
+            else:
+                self.yield_alpha = min(1.0, self.yield_alpha + 0.10 * dt_scale)
+        else:
+            self.yield_alpha = 1.0
+
+        # 演示激光尾迹（按住鼠标中键拖动）
+        mid_down = is_mouse_button_down(0x04)
+        if self.enable_demo_laser and mid_down:
+            self.idle_seconds = 0.0
+            if moved > 0.8 or not self.was_mid_down:
+                self.laser_points.append({"x": self.mouse_pos.x(), "y": self.mouse_pos.y(), "life": 1.0})
+                if len(self.laser_points) > 95:
+                    self.laser_points.pop(0)
+        self.was_mid_down = mid_down
+        for lp in self.laser_points:
+            lp["life"] -= 0.016 * dt_scale
+        self.laser_points = [lp for lp in self.laser_points if lp["life"] > 0.02]
+
+        # 摇一摇定位光圈（短时快速折返触发，带防误触冷却）
+        if self.enable_shake_find and now >= self._shake_cooldown_until:
+            if abs(dx) >= 14.0:
+                sign = 1 if dx > 0 else -1
+                if self._last_shake_sign != 0 and sign != self._last_shake_sign:
+                    self._shake_flips.append(now)
+                    self._shake_flips = [t for t in self._shake_flips if now - t <= 0.45]
+                    if len(self._shake_flips) >= 5:
+                        self._shake_flips.clear()
+                        self._shake_cooldown_until = now + 1.8
+                        self.find_halos.append({"x": self.mouse_pos.x(), "y": self.mouse_pos.y(), "r": 16.0, "max_r": 165.0 * math.sqrt(self.intensity), "alpha": 1.0})
+                        self.find_halos.append({"x": self.mouse_pos.x(), "y": self.mouse_pos.y(), "r": 8.0, "max_r": 110.0 * math.sqrt(self.intensity), "alpha": 0.9})
+                self._last_shake_sign = sign
+        for fh in self.find_halos:
+            fh["r"] += (fh["max_r"] - fh["r"]) * dt_lerp(0.14, dt_scale)
+            fh["alpha"] -= 0.024 * dt_scale
+        self.find_halos = [fh for fh in self.find_halos if fh["alpha"] > 0.02]
 
         if self.enable_ribbon:
             max_len = int(52 * self.intensity)
@@ -1733,7 +2031,7 @@ class MouseFXOverlay(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         colors = self.get_colors()
         scale = math.sqrt(self.intensity)
-        vis = self.idle_alpha
+        vis = self.idle_alpha * self.yield_alpha
 
         mask_alpha = int(round(self.current_mask_alpha))
         if mask_alpha > 0:
@@ -1802,6 +2100,8 @@ class MouseFXOverlay(QWidget):
             and not self.ink_strokes
             and not self.ink_blooms
             and not self.cinnabar_dots
+            and not self.laser_points
+            and not self.find_halos
         ):
             return
 
@@ -1900,13 +2200,19 @@ class MouseFXOverlay(QWidget):
             painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Plus)
             r = (21.0 + self.mouse_speed * 0.28 + self.prism_pulse * 9.0) * scale
 
+            painter.save()
+            painter.translate(self.ring_pos)
+            if self.enable_elastic_motion and self.stretch_factor > 1.01:
+                painter.rotate(self.vel_angle)
+                painter.scale(self.stretch_factor, 1.0 / math.sqrt(self.stretch_factor))
+                painter.rotate(-self.vel_angle)
+
             rim_base = QColor(255, 255, 255, int(38 * vis))
             painter.setPen(QPen(rim_base, 1.0 * scale))
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawEllipse(self.ring_pos, r, r)
+            painter.drawEllipse(QPointF(0, 0), r, r)
 
             painter.save()
-            painter.translate(self.ring_pos)
             painter.rotate(self.prism_angle)
             r_arc = QRectF(-r, -r, r * 2, r * 2)
 
@@ -1923,6 +2229,7 @@ class MouseFXOverlay(QWidget):
             spec_c = QColor(255, 255, 255, int(215 * vis))
             painter.setPen(QPen(spec_c, 1.2 * scale, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
             painter.drawArc(r_arc, 45 * 16, 55 * 16)
+            painter.restore()
             painter.restore()
 
             dot_c = QColor(255, 255, 255, int(225 * vis))
@@ -2027,15 +2334,22 @@ class MouseFXOverlay(QWidget):
                     )
                     painter.restore()
 
+                painter.save()
+                painter.translate(self.ring_pos)
+                if self.enable_elastic_motion and self.stretch_factor > 1.01:
+                    painter.rotate(self.vel_angle)
+                    painter.scale(self.stretch_factor, 1.0 / math.sqrt(self.stretch_factor))
+                    painter.rotate(-self.vel_angle)
                 glow_c = QColor(colors[0])
                 glow_c.setAlphaF(0.28 * vis)
                 painter.setPen(QPen(glow_c, 6.0 * scale))
-                painter.drawEllipse(self.ring_pos, self.ring_radius, self.ring_radius)
+                painter.drawEllipse(QPointF(0, 0), self.ring_radius, self.ring_radius)
 
                 ring_c = QColor(colors[0])
                 ring_c.setAlphaF(0.92 * vis)
                 painter.setPen(QPen(ring_c, 1.8 * scale))
-                painter.drawEllipse(self.ring_pos, self.ring_radius, self.ring_radius)
+                painter.drawEllipse(QPointF(0, 0), self.ring_radius, self.ring_radius)
+                painter.restore()
 
                 core_glow = QRadialGradient(self.mouse_pos, 10.0 * scale)
                 cg0 = QColor(colors[0])
@@ -2140,6 +2454,29 @@ class MouseFXOverlay(QWidget):
             painter.setBrush(QBrush(sg))
             painter.drawEllipse(pos, r_glow, r_glow)
 
+        if len(self.laser_points) > 1:
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Plus)
+            n_lp = len(self.laser_points)
+            for i in range(1, n_lp):
+                p0, p1 = self.laser_points[i - 1], self.laser_points[i]
+                a = max(0.0, min(1.0, p1["life"] * (0.35 + 0.65 * (i / n_lp))))
+                l_glow = QColor("#f43f5e")
+                l_glow.setAlphaF(0.45 * a)
+                painter.setPen(QPen(l_glow, 7.5 * scale, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+                painter.drawLine(QPointF(p0["x"], p0["y"]), QPointF(p1["x"], p1["y"]))
+                l_core = QColor("#ffffff")
+                l_core.setAlphaF(0.95 * a)
+                painter.setPen(QPen(l_core, 2.2 * scale, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+                painter.drawLine(QPointF(p0["x"], p0["y"]), QPointF(p1["x"], p1["y"]))
+
+        for fh in self.find_halos:
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Plus)
+            fc = QColor(colors[0])
+            fc.setAlphaF(max(0.0, min(1.0, fh["alpha"])))
+            painter.setPen(QPen(fc, 3.6 * scale))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawEllipse(QPointF(fh["x"], fh["y"]), fh["r"], fh["r"])
+
 
 class ControlPanel(QWidget):
     """独立可视化控制面板（支持场景预设、连续滑动条、自定义取色与全套设置）。"""
@@ -2150,7 +2487,7 @@ class ControlPanel(QWidget):
         self.on_sync_tray = on_sync_tray
 
         self.setWindowTitle("MouseFX 控制面板")
-        self.setFixedWidth(380)
+        self.setFixedWidth(420)
         self.setWindowFlags(
             Qt.WindowType.Window
             | Qt.WindowType.WindowStaysOnTopHint
@@ -2316,19 +2653,27 @@ class ControlPanel(QWidget):
         layout.addWidget(fun_label)
 
         self._fun_cbs: dict[str, QCheckBox] = {}
-        for title, attr in (
-            ("丝滑流体拖尾（贝塞尔光带）", "enable_ribbon"),
-            ("水面激荡波纹（流体 V 形水痕）", "enable_water_wake"),
+        fun_grid = QGridLayout()
+        fun_grid.setSpacing(4)
+        fun_items = (
+            ("丝滑流体拖尾", "enable_ribbon"),
+            ("水面激荡波纹", "enable_water_wake"),
             ("点击礼花火花", "enable_fireworks"),
             ("环绕跟宠小光灵", "enable_pet_orb"),
-            ("蒙版手电筒透光模式", "enable_flashlight"),
-            ("演示模式（录屏/共享用：左键青波，右键粉波）", "enable_demo_mode"),
-            ("静止 2.6 秒自动淡出休眠", "enable_idle_sleep"),
-        ):
+            ("手电筒透光蒙版", "enable_flashlight"),
+            ("速度弹性形变", "enable_elastic_motion"),
+            ("演示模式（左青右粉）", "enable_demo_mode"),
+            ("演示中键激光尾迹", "enable_demo_laser"),
+            ("静止 2.6 秒休眠", "enable_idle_sleep"),
+            ("滚动/打字自动让位", "enable_auto_yield"),
+            ("摇一摇定位光圈", "enable_shake_find"),
+        )
+        for idx, (title, attr) in enumerate(fun_items):
             cb = QCheckBox(title)
             cb.toggled.connect(lambda checked, a=attr: overlay.set_fun_option(a, checked))
-            layout.addWidget(cb)
+            fun_grid.addWidget(cb, idx // 2, idx % 2)
             self._fun_cbs[attr] = cb
+        layout.addLayout(fun_grid)
 
         line2 = QFrame()
         line2.setFrameShape(QFrame.Shape.HLine)
@@ -2343,6 +2688,20 @@ class ControlPanel(QWidget):
         self.fs_avoid_cb.toggled.connect(overlay.set_fullscreen_avoid)
         layout.addWidget(self.fs_avoid_cb)
 
+        proc_row = QHBoxLayout()
+        proc_row.setSpacing(6)
+        self.proc_avoid_cb = QCheckBox("进程避让")
+        self.proc_avoid_cb.toggled.connect(self._on_proc_avoid_changed)
+        self.proc_edit = QLineEdit()
+        self.proc_edit.setPlaceholderText("逗号分隔，如 photoshop.exe, cs2.exe")
+        self.proc_edit.setStyleSheet(
+            "background-color: #1e1e24; border: 1px solid #2e2e38; border-radius: 5px; padding: 3px 8px; color: #f4f4f5;"
+        )
+        self.proc_edit.editingFinished.connect(self._on_proc_avoid_changed)
+        proc_row.addWidget(self.proc_avoid_cb)
+        proc_row.addWidget(self.proc_edit, 1)
+        layout.addLayout(proc_row)
+
         self.topmost_cb = QCheckBox("特效覆盖所有窗口（强制置于最顶层）")
         self.topmost_cb.toggled.connect(overlay.set_always_on_top_force)
         layout.addWidget(self.topmost_cb)
@@ -2350,6 +2709,16 @@ class ControlPanel(QWidget):
         self.autostart_cb = QCheckBox("Windows 开机自启")
         self.autostart_cb.toggled.connect(self._on_autostart_toggled)
         layout.addWidget(self.autostart_cb)
+
+        share_row = QHBoxLayout()
+        share_row.setSpacing(6)
+        export_btn = QPushButton("导出分享码")
+        export_btn.clicked.connect(self._on_export_config)
+        import_btn = QPushButton("导入配置")
+        import_btn.clicked.connect(self._on_import_config)
+        share_row.addWidget(export_btn)
+        share_row.addWidget(import_btn)
+        layout.addLayout(share_row)
 
         btn_row = QHBoxLayout()
         self.pause_btn = QPushButton("暂停特效")
@@ -2382,6 +2751,8 @@ class ControlPanel(QWidget):
             self.taskbar_cb,
             self.cursor_cb,
             self.fs_avoid_cb,
+            self.proc_avoid_cb,
+            self.proc_edit,
             self.topmost_cb,
             self.autostart_cb,
             *self._fun_cbs.values(),
@@ -2401,6 +2772,8 @@ class ControlPanel(QWidget):
             cb.setChecked(bool(getattr(self.overlay, attr)))
         self.cursor_cb.setChecked(self.overlay.enable_custom_cursor)
         self.fs_avoid_cb.setChecked(self.overlay.enable_fullscreen_avoid)
+        self.proc_avoid_cb.setChecked(self.overlay.enable_process_avoid)
+        self.proc_edit.setText(", ".join(self.overlay.avoid_processes))
         self.topmost_cb.setChecked(self.overlay.always_on_top_force)
         self.autostart_cb.setChecked(is_autostart_enabled())
         self.pause_btn.setText("恢复特效" if self.overlay.paused else "暂停特效")
@@ -2413,6 +2786,8 @@ class ControlPanel(QWidget):
             self.taskbar_cb,
             self.cursor_cb,
             self.fs_avoid_cb,
+            self.proc_avoid_cb,
+            self.proc_edit,
             self.topmost_cb,
             self.autostart_cb,
             *self._fun_cbs.values(),
@@ -2465,6 +2840,26 @@ class ControlPanel(QWidget):
         self.overlay.reset_to_defaults()
         self.sync_from_overlay()
         self.on_sync_tray()
+
+    def _on_proc_avoid_changed(self, *_args) -> None:
+        self.overlay.set_process_avoid(self.proc_avoid_cb.isChecked(), self.proc_edit.text())
+
+    def _on_export_config(self) -> None:
+        code = self.overlay.export_config_code()
+        cb = QApplication.clipboard()
+        if cb is not None:
+            cb.setText(code)
+        QMessageBox.information(self, "导出成功", "当前配置分享码已复制到剪贴板，可直接发给朋友或贴入导入框。")
+
+    def _on_import_config(self) -> None:
+        text, ok = QInputDialog.getText(self, "导入配置", "请粘贴 MouseFX 配置分享码 (MFX1:...) 或 JSON：")
+        if not ok or not text.strip():
+            return
+        if self.overlay.import_config_code(text):
+            self.sync_from_overlay()
+            self.on_sync_tray()
+        else:
+            QMessageBox.warning(self, "导入失败", "配置格式无效，请检查是否完整复制。")
 
     def _on_quit_clicked(self) -> None:
         shutdown_and_restore()
