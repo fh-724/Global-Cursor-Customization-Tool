@@ -16,7 +16,9 @@
 
 * ⚡ **Buttery Smooth at 240Hz & Multi-Monitor Ready**: Delta-time physics keep animations silky at high refresh rates across all your monitors. Choose whether effects float over every window or chill strictly on the desktop layer.
 * 🪄 **Effects + Full Custom Cursor Sets**: Switch between 6 artistic vibes (Ambient Spotlight, Constellation Web, Magnetic Ring, Ink Wash, Optical Prism, and Falling Sakura 🌸) with matching 13-slot Windows system cursors—everything snaps cleanly back to your default cursors when paused or closed.
-* 🎛️ **Stackable Extras & Free Color Tuning**: Left-click the tray icon to pop open the control panel—layer on silk ribbon trails, Kelvin water-wake ripples 🌊, a taskbar-safe flashlight dark mask 🔦, or demo click ripples, plus custom color picking 🎨 and one-click presets.
+* 🎛️ **Stackable Extras & Free Color Tuning**: Left-click the tray icon to pop open the control panel—layer on silk ribbon trails, water-wake ripples 🌊, elastic stretch, a middle-click laser trail, a taskbar-safe flashlight mask 🔦, or demo click ripples, plus custom color picking 🎨 and one-click presets.
+* 🧩 **Knows When to Step Aside**: Effects hide while `photoshop.exe` / `blender.exe` / `cs2.exe` (list is editable) is in front, and while you scroll or type. Shake the mouse and a ring shows up wherever the cursor is.
+* 🎁 **Shareable Setup**: Export the whole configuration as a `MFX1:` code and hand it to someone else—they paste it in and get your exact look.
 * 🛡️ **Zero-Hassle Daily Driver**: Comes with single-instance protection, automatic pause during fullscreen games or videos 🎮, persistent local settings, and optional Windows startup launch.
 
 ### 🚀 Quick Start
@@ -63,7 +65,9 @@ If MouseFX gets killed hard (Task Manager "End task", `taskkill /F`, or a crash)
 
 * ⚡ **高刷跟手、多屏随便滑**：专为高刷屏调校（240Hz 也丝般顺滑），多显示器无缝跨屏，想让特效浮在所有窗口上面还是只留在桌面底层都能一键切换。
 * 🪄 **特效 + 全套指针一起换**：内置柔光氛围光晕、蛛网引力连线、极简磁力光环、水墨丹青、光学棱镜、唯美落樱 🌸，还会同步把全套 13 种系统指针一起换装；暂停或退出时自动无损还原，完全不用担心改乱系统。
-* 🎛️ **自由叠 Buff、随便调颜色**：点一下右下角托盘图标就能呼出控制面板——丝滑流体拖尾、V 形水面波纹 🌊、手电筒透光黑色蒙版 🔦（自动避开任务栏）、录屏演示模式随便叠，配色也能自己取 🎨！
+* 🎛️ **自由叠 Buff、随便调颜色**：点一下右下角托盘图标就能呼出控制面板——丝滑流体拖尾、V 形水面波纹 🌊、速度弹性形变、中键激光尾迹、手电筒透光黑色蒙版 🔦（自动避开任务栏）、录屏演示模式随便叠，配色也能自己取 🎨！
+* 🧩 **知道什么时候该让开**：前台是 PS / Blender / CS2（名单可改）时自动隐退，滚动或打字时也会淡出。找不着指针就摇两下鼠标，原地亮个光圈。
+* 🎁 **配置能送人**：整套设置可以导出成 `MFX1:` 分享码，别人粘进去就是你同款。
 * 🛡️ **日常超省心**：自带防手滑双开保护、全屏打游戏/看视频自动隐身避让 🎮，还会乖乖记住你的所有设置，支持开机自启。
 
 ### 🚀 快速开玩
