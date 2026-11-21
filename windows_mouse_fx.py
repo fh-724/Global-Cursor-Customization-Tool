@@ -68,8 +68,10 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QSlider,
     QSystemTrayIcon,
+    QToolButton,
     QVBoxLayout,
     QWidget,
+    QWidgetAction,
 )
 
 if sys.platform == "win32":
@@ -2478,47 +2480,29 @@ class MouseFXOverlay(QWidget):
             painter.drawEllipse(QPointF(fh["x"], fh["y"]), fh["r"], fh["r"])
 
 
-class CollapsibleSection(QWidget):
-    """带箭头的可折叠分组，用来收拢控制面板里占地方的多选项。"""
+class DropdownPanel(QToolButton):
+    """点击弹出的下拉面板：内容放在 QMenu 里，展开时不会撑高控制面板。"""
 
-    def __init__(self, title: str, expanded: bool = False, parent: QWidget | None = None) -> None:
+    def __init__(self, title: str, min_width: int = 360, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.title = title
-        self._expanded = expanded
+        self.setObjectName("DropdownToggle")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self.setText(f"{title}  ▾")
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(2)
-
-        self.header = QPushButton()
-        self.header.setObjectName("SectionToggle")
-        self.header.setCheckable(True)
-        self.header.setChecked(expanded)
-        self.header.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.header.clicked.connect(self.toggle)
-        root.addWidget(self.header)
-
+        self.menu = QMenu(self)
+        self.menu.setMinimumWidth(min_width)
         self.body = QWidget()
         self.content = QVBoxLayout(self.body)
-        self.content.setContentsMargins(12, 2, 0, 6)
-        self.content.setSpacing(5)
-        self.body.setVisible(expanded)
-        root.addWidget(self.body)
+        self.content.setContentsMargins(12, 10, 12, 10)
+        self.content.setSpacing(6)
 
-        self._refresh_header()
-
-    def _refresh_header(self) -> None:
-        arrow = "▾" if self._expanded else "▸"
-        self.header.setText(f"{arrow}  {self.title}")
-
-    def toggle(self) -> None:
-        self.set_expanded(not self._expanded)
-
-    def set_expanded(self, expanded: bool) -> None:
-        self._expanded = expanded
-        self.body.setVisible(expanded)
-        self.header.setChecked(expanded)
-        self._refresh_header()
+        holder = QWidgetAction(self.menu)
+        holder.setDefaultWidget(self.body)
+        self.menu.addAction(holder)
+        self.setMenu(self.menu)
 
 
 class ControlPanel(QWidget):
@@ -2561,6 +2545,24 @@ class ControlPanel(QWidget):
             }
             QPushButton#SectionToggle:hover {
                 color: #e4e4e7;
+            }
+            QToolButton#DropdownToggle {
+                text-align: left;
+                border: 1px solid #2e2e38;
+                border-radius: 6px;
+                background-color: #1a1a20;
+                color: #d4d4d8;
+                font-size: 12px;
+                font-weight: bold;
+                padding: 6px 10px;
+            }
+            QToolButton#DropdownToggle:hover {
+                background-color: #232329;
+                border-color: #3f3f4e;
+            }
+            QMenu {
+                background-color: #16161c;
+                border: 1px solid #2e2e38;
             }
             QComboBox {
                 background-color: #1e1e24;
@@ -2703,8 +2705,8 @@ class ControlPanel(QWidget):
         line.setStyleSheet("color: #27272f;")
         layout.addWidget(line)
 
-        fun_section = CollapsibleSection("趣味功能（可叠加）")
-
+        fun_dropdown = DropdownPanel("趣味功能  · 已开 0 项", min_width=380)
+        self._fun_dropdown = fun_dropdown
         self._fun_cbs: dict[str, QCheckBox] = {}
         fun_grid = QGridLayout()
         fun_grid.setSpacing(4)
@@ -2724,25 +2726,27 @@ class ControlPanel(QWidget):
         for idx, (title, attr) in enumerate(fun_items):
             cb = QCheckBox(title)
             cb.toggled.connect(lambda checked, a=attr: overlay.set_fun_option(a, checked))
+            cb.toggled.connect(lambda _c: self._refresh_fun_title())
             fun_grid.addWidget(cb, idx // 2, idx % 2)
             self._fun_cbs[attr] = cb
-        fun_section.content.addLayout(fun_grid)
-        layout.addWidget(fun_section)
+        fun_dropdown.content.addLayout(fun_grid)
+        layout.addWidget(fun_dropdown)
 
         line2 = QFrame()
         line2.setFrameShape(QFrame.Shape.HLine)
         line2.setStyleSheet("color: #27272f;")
         layout.addWidget(line2)
 
-        behavior_section = CollapsibleSection("行为与兼容")
+        behavior_dropdown = DropdownPanel("行为与兼容", min_width=380)
+        self._behavior_dropdown = behavior_dropdown
 
         self.cursor_cb = QCheckBox("随风格切换全套专属鼠标指针图标")
         self.cursor_cb.toggled.connect(overlay.set_custom_cursor_enabled)
-        behavior_section.content.addWidget(self.cursor_cb)
+        behavior_dropdown.content.addWidget(self.cursor_cb)
 
         self.fs_avoid_cb = QCheckBox("全屏游戏 / 看视频时自动避让暂停")
         self.fs_avoid_cb.toggled.connect(overlay.set_fullscreen_avoid)
-        behavior_section.content.addWidget(self.fs_avoid_cb)
+        behavior_dropdown.content.addWidget(self.fs_avoid_cb)
 
         proc_row = QHBoxLayout()
         proc_row.setSpacing(6)
@@ -2756,17 +2760,17 @@ class ControlPanel(QWidget):
         self.proc_edit.editingFinished.connect(self._on_proc_avoid_changed)
         proc_row.addWidget(self.proc_avoid_cb)
         proc_row.addWidget(self.proc_edit, 1)
-        behavior_section.content.addLayout(proc_row)
+        behavior_dropdown.content.addLayout(proc_row)
 
         self.topmost_cb = QCheckBox("特效覆盖所有窗口（强制置于最顶层）")
         self.topmost_cb.toggled.connect(overlay.set_always_on_top_force)
-        behavior_section.content.addWidget(self.topmost_cb)
+        behavior_dropdown.content.addWidget(self.topmost_cb)
 
         self.autostart_cb = QCheckBox("Windows 开机自启")
         self.autostart_cb.toggled.connect(self._on_autostart_toggled)
-        behavior_section.content.addWidget(self.autostart_cb)
+        behavior_dropdown.content.addWidget(self.autostart_cb)
 
-        layout.addWidget(behavior_section)
+        layout.addWidget(behavior_dropdown)
 
         share_label = QLabel("配置分享")
         share_label.setObjectName("SectionTitle")
@@ -2803,6 +2807,10 @@ class ControlPanel(QWidget):
         layout.addLayout(btn_row)
 
         self.sync_from_overlay()
+
+    def _refresh_fun_title(self) -> None:
+        n = sum(1 for cb in self._fun_cbs.values() if cb.isChecked())
+        self._fun_dropdown.setText(f"趣味功能  · 已开 {n} 项  ▾")
 
     def sync_from_overlay(self) -> None:
         for w in (
@@ -2855,6 +2863,8 @@ class ControlPanel(QWidget):
             *self._fun_cbs.values(),
         ):
             w.blockSignals(False)
+
+        self._refresh_fun_title()
 
     def _on_preset_clicked(self, preset_id: str) -> None:
         self.overlay.apply_preset(preset_id)
