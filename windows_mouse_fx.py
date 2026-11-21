@@ -1489,18 +1489,23 @@ class MouseFXOverlay(QWidget):
                 self._spawn_sakura_petal(x, y, burst=True)
 
         if self.enable_fireworks:
-            count = int(18 * self.intensity)
+            count = int(20 * self.intensity)
+            scale_sqrt = math.sqrt(self.intensity)
             for _ in range(count):
                 ang = random.uniform(0, math.pi * 2)
-                spd = random.uniform(2.0, 6.8) * math.sqrt(self.intensity)
+                spd = random.uniform(3.2, 9.4) * scale_sqrt
                 self.sparks.append(
                     {
                         "x": x,
                         "y": y,
+                        "px": x,
+                        "py": y,
                         "vx": math.cos(ang) * spd,
-                        "vy": math.sin(ang) * spd - 1.3,
-                        "size": random.uniform(2.0, 4.0) * math.sqrt(self.intensity),
+                        "vy": math.sin(ang) * spd - 1.1,
+                        "size": random.uniform(1.6, 3.2) * scale_sqrt,
                         "alpha": 1.0,
+                        "decay": random.uniform(0.022, 0.036),
+                        "twinkle": random.uniform(0.0, math.pi * 2),
                         "color": random.choice(colors),
                     }
                 )
@@ -1889,11 +1894,15 @@ class MouseFXOverlay(QWidget):
         self.ripples = [rp for rp in self.ripples if rp["alpha"] > 0.02]
 
         for sp in self.sparks:
+            sp["px"] = sp["x"]
+            sp["py"] = sp["y"]
             sp["x"] += sp["vx"] * dt_scale
             sp["y"] += sp["vy"] * dt_scale
-            sp["vy"] += 0.14 * dt_scale
-            sp["vx"] *= 0.97 ** dt_scale
-            sp["alpha"] -= 0.025 * dt_scale
+            drag = 0.935 ** dt_scale
+            sp["vx"] *= drag
+            sp["vy"] = sp["vy"] * drag + 0.095 * dt_scale
+            sp["twinkle"] += 0.35 * dt_scale
+            sp["alpha"] -= sp["decay"] * dt_scale
         self.sparks = [sp for sp in self.sparks if sp["alpha"] > 0.02]
 
         if self.idle_alpha <= 0.01 and not self._has_active_animations():
@@ -2442,19 +2451,30 @@ class MouseFXOverlay(QWidget):
             painter.drawEllipse(QPointF(rp["x"], rp["y"]), rp["r"], rp["r"])
 
         for sp in self.sparks:
-            pos = QPointF(sp["x"], sp["y"])
-            r_glow = sp["size"] * 2.5
-            sg = QRadialGradient(pos, r_glow)
-            sc0 = QColor("#ffffff")
-            sc0.setAlphaF(max(0.0, min(1.0, sp["alpha"] * 0.9)))
-            sc1 = QColor(sp["color"])
-            sc1.setAlphaF(max(0.0, min(1.0, sp["alpha"] * 0.75)))
-            sg.setColorAt(0.0, sc0)
-            sg.setColorAt(0.45, sc1)
-            sg.setColorAt(1.0, QColor(0, 0, 0, 0))
+            a = max(0.0, min(1.0, sp["alpha"]))
+            flicker = 0.78 + 0.22 * math.sin(sp["twinkle"]) if a < 0.65 else 1.0
+            eff_a = a * flicker
+            head = QPointF(sp["x"], sp["y"])
+            tail = QPointF(
+                sp["x"] - sp["vx"] * 2.2,
+                sp["y"] - sp["vy"] * 2.2,
+            )
+            sz = sp["size"] * (0.45 + 0.55 * a)
+
+            outer_c = QColor(sp["color"])
+            outer_c.setAlphaF(eff_a * 0.52)
+            painter.setPen(QPen(outer_c, max(1.2, sz * 2.2), Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+            painter.drawLine(tail, head)
+
+            core_c = blend_color(QColor(sp["color"]), QColor("#ffffff"), 0.55)
+            core_c.setAlphaF(eff_a * 0.92)
+            painter.setPen(QPen(core_c, max(0.7, sz * 0.85), Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+            painter.drawLine(tail, head)
+
+            tip_c = QColor(255, 255, 255, int(245 * eff_a))
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QBrush(sg))
-            painter.drawEllipse(pos, r_glow, r_glow)
+            painter.setBrush(tip_c)
+            painter.drawEllipse(head, max(0.8, sz * 0.65), max(0.8, sz * 0.65))
 
         if len(self.laser_points) > 1:
             painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Plus)
